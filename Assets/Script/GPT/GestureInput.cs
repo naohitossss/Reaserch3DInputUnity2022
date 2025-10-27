@@ -30,6 +30,8 @@ public class GestureInput : MonoBehaviour
 
     private Transform indexTip;
     private Transform middleTip;
+    private Transform thumbTip;    // 追加
+    private Transform pinkyTip;    // 追加
     private bool isInitialized;
 
     private bool prevMiddlePinch;
@@ -57,6 +59,23 @@ public class GestureInput : MonoBehaviour
     private int waveDirectionChanges = 0; // 左右の移動回数
     private float lastWaveDirection = 0; // 前回の移動方向
 
+    // 親指・小指用の振り検出用状態
+    private Vector3 previousThumbPosition;
+    private int thumbWaveDirectionChanges = 0;
+    private float thumbLastWaveDirection = 0;
+    private float thumbWaveStartTime;
+
+    private Vector3 previousPinkyPosition;
+    private int pinkyWaveDirectionChanges = 0;
+    private float pinkyLastWaveDirection = 0;
+    private float pinkyWaveStartTime;
+
+    [Header("Wave Settings")]
+    [Tooltip("親指振りで必要な方向変化回数")]
+    public int thumbWaveRequiredChanges = 4;
+    [Tooltip("小指振りで必要な方向変化回数")]
+    public int pinkyWaveRequiredChanges = 4;
+
     void Start()
     {
         InitializeBones();
@@ -72,6 +91,12 @@ public class GestureInput : MonoBehaviour
                 indexTip = bone.Transform;
             if (bone.Id == OVRSkeleton.BoneId.Hand_MiddleTip)
                 middleTip = bone.Transform;
+
+            // 追加: 親指と小指の先端を取得
+            if (bone.Id == OVRSkeleton.BoneId.Hand_ThumbTip)
+                thumbTip = bone.Transform;
+            if (bone.Id == OVRSkeleton.BoneId.Hand_PinkyTip)
+                pinkyTip = bone.Transform;
         }
 
         if (indexTip && middleTip)
@@ -99,8 +124,9 @@ public class GestureInput : MonoBehaviour
 
         // === 新しいジェスチャーの検出 ===
         bool isFist = IsFistGesture();
-        bool isGood = IsGoodGesture();
-        bool isPinky = IsPinkyGesture();
+        // ここを親指振り / 小指振り に変更
+        bool isGood = IsThumbWaveGesture();   // 親指振り -> 大文字
+        bool isPinky = IsPinkyWaveGesture();  // 小指振り -> 小文字
         bool isWave = IsWaveGesture();
 
         if (isWave && !prevWaveGesture)
@@ -255,6 +281,106 @@ public class GestureInput : MonoBehaviour
         }
 
         previousHandPosition = currentHandPosition;
+        return false;
+    }
+
+    private bool IsThumbWaveGesture()
+    {
+        if (CurrentPhase != InputPhase.Idle) return false;
+        if (thumbTip == null) return false;
+
+        Vector3 pos = thumbTip.position;
+
+        if (previousThumbPosition == Vector3.zero)
+        {
+            previousThumbPosition = pos;
+            thumbWaveStartTime = Time.time;
+            thumbLastWaveDirection = 0;
+            thumbWaveDirectionChanges = 0;
+            return false;
+        }
+
+        float dir = pos.x - previousThumbPosition.x;
+
+        if (Mathf.Abs(dir) > moveThreshold)
+        {
+            if (thumbLastWaveDirection == 0)
+            {
+                thumbLastWaveDirection = dir;
+            }
+            else if (Mathf.Sign(dir) != Mathf.Sign(thumbLastWaveDirection))
+            {
+                thumbWaveDirectionChanges++;
+                thumbLastWaveDirection = dir;
+
+                if (thumbWaveDirectionChanges >= thumbWaveRequiredChanges)
+                {
+                    thumbWaveDirectionChanges = 0;
+                    previousThumbPosition = Vector3.zero;
+                    thumbLastWaveDirection = 0;
+                    return true;
+                }
+            }
+        }
+
+        if (Time.time - thumbWaveStartTime > waveDetectionTime)
+        {
+            thumbWaveDirectionChanges = 0;
+            thumbWaveStartTime = Time.time;
+            thumbLastWaveDirection = 0;
+        }
+
+        previousThumbPosition = pos;
+        return false;
+    }
+
+    private bool IsPinkyWaveGesture()
+    {
+        if (CurrentPhase != InputPhase.Idle) return false;
+        if (pinkyTip == null) return false;
+
+        Vector3 pos = pinkyTip.position;
+
+        if (previousPinkyPosition == Vector3.zero)
+        {
+            previousPinkyPosition = pos;
+            pinkyWaveStartTime = Time.time;
+            pinkyLastWaveDirection = 0;
+            pinkyWaveDirectionChanges = 0;
+            return false;
+        }
+
+        float dir = pos.x - previousPinkyPosition.x;
+
+        if (Mathf.Abs(dir) > moveThreshold)
+        {
+            if (pinkyLastWaveDirection == 0)
+            {
+                pinkyLastWaveDirection = dir;
+            }
+            else if (Mathf.Sign(dir) != Mathf.Sign(pinkyLastWaveDirection))
+            {
+                pinkyWaveDirectionChanges++;
+                pinkyLastWaveDirection = dir;
+
+                if (pinkyWaveDirectionChanges >= pinkyWaveRequiredChanges)
+                {
+                    pinkyWaveDirectionChanges = 0;
+                    previousPinkyPosition = Vector3.zero;
+                    pinkyLastWaveDirection = 0;
+                    return true;
+                }
+            }
+        }
+
+        if (Time.time - pinkyWaveStartTime > waveDetectionTime)
+        {
+            pinkyWaveDirectionChanges = 0;
+            pinkyWaveStartTime = Time.time;
+            pinkyLastWaveDirection = 0;
+        }
+
+        previousPinkyPosition = pos;
         return false;
     }
 }
