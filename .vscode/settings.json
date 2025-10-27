@@ -51,5 +51,5 @@
         "temp/": true,
         "Temp/": true
     },
-    "dotnet.defaultSolution": "Input2022.sln"
+    "dotnet.defaultSolution": "3Dresearch.sln"
 }

@@ -24,6 +24,13 @@ public class InputController : MonoBehaviour
         {
             gestureManager.OnCategorySelected += OnCategorySelected;
             gestureManager.OnKeySelected += OnKeySelected;
+
+            // Backspace イベントをリッスン
+            gestureManager.OnBackspace += OnBackspace;
+
+            // Uppercase と Lowercase イベントをリッスン
+            gestureManager.OnUppercase += OnUppercase;
+            gestureManager.OnLowercase += OnLowercase;
         }
     }
 
@@ -48,5 +55,31 @@ public class InputController : MonoBehaviour
         }
 
         currentCategory = -1;
+    }
+
+    void OnBackspace()
+    {
+        if (InputManager.instance != null)
+        {
+            InputManager.instance.Backspace();
+        }
+    }
+
+    void OnUppercase()
+    {
+        if (InputManager.instance != null)
+        {
+            InputManager.instance.ToggleShift();
+            Debug.Log("🔠 Shift Activated (Uppercase)");
+        }
+    }
+
+    void OnLowercase()
+    {
+        if (InputManager.instance != null)
+        {
+            InputManager.instance.ToggleShift();
+            Debug.Log("🔡 Shift Deactivated (Lowercase)");
+        }
     }
 }

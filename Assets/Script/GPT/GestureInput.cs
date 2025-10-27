@@ -40,6 +40,22 @@ public class GestureInput : MonoBehaviour
 
     public event Action<Vector3, Vector3> OnCategorySelected;
     public event Action<Vector3, Vector3> OnKeySelected;
+    public event Action OnBackspace;
+    public event Action OnUppercase;
+    public event Action OnLowercase;
+    public event Action OnSpace;
+
+    private bool prevFistGesture;
+    private bool prevGoodGesture;
+    private bool prevPinkyGesture;
+    private bool prevWaveGesture;
+
+    private Vector3 previousHandPosition;
+    private float waveDetectionTime = 0.5f; // 検出に必要な時間
+    private float waveStartTime;
+
+    private int waveDirectionChanges = 0; // 左右の移動回数
+    private float lastWaveDirection = 0; // 前回の移動方向
 
     void Start()
     {
@@ -81,13 +97,42 @@ public class GestureInput : MonoBehaviour
         bool indexPinchDown = indexNow && !prevIndexPinch;
         bool indexPinchUp = !indexNow && prevIndexPinch;
 
+        // === 新しいジェスチャーの検出 ===
+        bool isFist = IsFistGesture();
+        bool isGood = IsGoodGesture();
+        bool isPinky = IsPinkyGesture();
+        bool isWave = IsWaveGesture();
+
+        if (isWave && !prevWaveGesture)
+        {
+            OnBackspace?.Invoke();
+            if (debugLog) Debug.Log("🔙 Backspace triggered");
+        }
+
+        if (isGood && !prevGoodGesture)
+        {
+            OnUppercase?.Invoke();
+            if (debugLog) Debug.Log("🔠 Uppercase triggered");
+        }
+
+        if (isPinky && !prevPinkyGesture)
+        {
+            OnLowercase?.Invoke();
+            if (debugLog) Debug.Log("🔡 Lowercase triggered");
+        }
+
+        if (isFist && !prevFistGesture)
+        {
+            OnSpace?.Invoke();
+            if (debugLog) Debug.Log("␣ Space triggered");
+        }
+
         // === 各フェーズ ===
         switch (CurrentPhase)
         {
             case InputPhase.Idle:
-                if (middlePinchDown)  // middlePinchUpからmiddlePinchDownに変更
+                if (middlePinchDown)
                 {
-                    // ワールド座標に変換して記録
                     categoryStartPos = middleTip.position;
                     CurrentPhase = InputPhase.CategoryReady;
                     if (debugLog) Debug.Log("🟢 Category ready at world pos " + categoryStartPos);
@@ -99,11 +144,11 @@ public class GestureInput : MonoBehaviour
                 {
                     Vector3 categoryEndPos = indexTip.position;
                     float distance = Vector3.Distance(categoryStartPos, categoryEndPos);
-                    
+
                     if (distance > moveThreshold)
                     {
                         int directionIndex = DirectionalSelector.GetDirectionIndex(categoryStartPos, categoryEndPos);
-                        if (directionIndex != -1)  // 有効な方向の場合のみ処理
+                        if (directionIndex != -1)
                         {
                             if (debugLog) Debug.Log($"Direction: {DirectionalSelector.GetDirectionName(directionIndex)}");
                             OnCategorySelected?.Invoke(categoryStartPos, categoryEndPos);
@@ -130,11 +175,87 @@ public class GestureInput : MonoBehaviour
 
         prevMiddlePinch = middleNow;
         prevIndexPinch = indexNow;
+        prevFistGesture = isFist;
+        prevGoodGesture = isGood;
+        prevPinkyGesture = isPinky;
+        prevWaveGesture = isWave;
     }
 
     private void ResetState()
     {
         CurrentPhase = InputPhase.Idle;
+    }
+
+    private bool IsFistGesture()
+    {
+        return hand.GetFingerIsPinching(OVRHand.HandFinger.Index) &&
+               hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
+               hand.GetFingerIsPinching(OVRHand.HandFinger.Ring) &&
+               hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky);
+    }
+
+    private bool IsGoodGesture()
+    {
+        return hand.GetFingerIsPinching(OVRHand.HandFinger.Thumb) &&
+               !hand.GetFingerIsPinching(OVRHand.HandFinger.Index) &&
+               !hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
+               !hand.GetFingerIsPinching(OVRHand.HandFinger.Ring) &&
+               !hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky);
+    }
+
+    private bool IsPinkyGesture()
+    {
+        return hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky) &&
+               !hand.GetFingerIsPinching(OVRHand.HandFinger.Index) &&
+               !hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
+               !hand.GetFingerIsPinching(OVRHand.HandFinger.Ring);
+    }
+
+    private bool IsWaveGesture()
+    {
+        // 他のフェーズ中は手を振るジェスチャーを無効化
+        if (CurrentPhase != InputPhase.Idle)
+        {
+            return false;
+        }
+
+        Vector3 currentHandPosition = hand.PointerPose.position;
+
+        // 初回の位置を記録
+        if (previousHandPosition == Vector3.zero)
+        {
+            previousHandPosition = currentHandPosition;
+            waveStartTime = Time.time;
+            return false;
+        }
+
+        // 現在の移動方向を計算
+        float currentDirection = currentHandPosition.x - previousHandPosition.x;
+
+        // 移動方向が変わった場合
+        if (Mathf.Sign(currentDirection) != Mathf.Sign(lastWaveDirection) && Mathf.Abs(currentDirection) > moveThreshold)
+        {
+            waveDirectionChanges++;
+            lastWaveDirection = currentDirection;
+
+            // 一定回数以上方向が変わったらジェスチャーを検出
+            if (waveDirectionChanges >= 4) // 例: 左右2回ずつで4回
+            {
+                waveDirectionChanges = 0; // リセット
+                previousHandPosition = Vector3.zero; // リセット
+                return true;
+            }
+        }
+
+        // 一定時間内に方向変化がなければリセット
+        if (Time.time - waveStartTime > waveDetectionTime)
+        {
+            waveDirectionChanges = 0;
+            waveStartTime = Time.time;
+        }
+
+        previousHandPosition = currentHandPosition;
+        return false;
     }
 }
 
