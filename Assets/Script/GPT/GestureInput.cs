@@ -24,6 +24,10 @@ public class GestureInput : MonoBehaviour
     public float moveThreshold = 0.04f;
     public bool debugLog = true;
 
+    [Header("UI Settings")]
+    [Tooltip("UIブロックの生成位置。手の操作がしやすい場所に設定。")]
+    public Vector3 uiPosition = new Vector3(0f, 1.0f, 0.5f);  // Z位置を調整
+
     private Transform indexTip;
     private Transform middleTip;
     private bool isInitialized;
@@ -81,7 +85,7 @@ public class GestureInput : MonoBehaviour
         switch (CurrentPhase)
         {
             case InputPhase.Idle:
-                if (middlePinchUp)
+                if (middlePinchDown)  // middlePinchUpからmiddlePinchDownに変更
                 {
                     // ワールド座標に変換して記録
                     categoryStartPos = middleTip.position;
@@ -94,14 +98,18 @@ public class GestureInput : MonoBehaviour
                 if (indexPinchDown)
                 {
                     Vector3 categoryEndPos = indexTip.position;
-                    if (Vector3.Distance(categoryStartPos, categoryEndPos) > moveThreshold)
+                    float distance = Vector3.Distance(categoryStartPos, categoryEndPos);
+                    
+                    if (distance > moveThreshold)
                     {
-                        // 世界座標基準で方向判定
-                        OnCategorySelected?.Invoke(categoryStartPos, categoryEndPos);
-
-                        keyStartPos = categoryEndPos;
-                        CurrentPhase = InputPhase.KeySelecting;
-                        if (debugLog) Debug.Log("📁 Category Selected → KeySelecting");
+                        int directionIndex = DirectionalSelector.GetDirectionIndex(categoryStartPos, categoryEndPos);
+                        if (directionIndex != -1)  // 有効な方向の場合のみ処理
+                        {
+                            if (debugLog) Debug.Log($"Direction: {DirectionalSelector.GetDirectionName(directionIndex)}");
+                            OnCategorySelected?.Invoke(categoryStartPos, categoryEndPos);
+                            keyStartPos = categoryEndPos;
+                            CurrentPhase = InputPhase.KeySelecting;
+                        }
                     }
                 }
                 break;
