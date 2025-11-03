@@ -10,6 +10,9 @@ public class HandTracker : MonoBehaviour
     private Transform middleTip;
     private bool isInitialized;
 
+    private float updateInterval = 0.1f; // 0.1秒ごとに更新
+    private float nextUpdateTime = 0f;
+
     public Vector3 IndexTipPos => indexTip ? indexTip.position : Vector3.zero;
     public Vector3 MiddleTipPos => middleTip ? middleTip.position : Vector3.zero;
 
@@ -39,8 +42,14 @@ public class HandTracker : MonoBehaviour
 
     void Update()
     {
-        if (!isInitialized)
-            InitializeBones();
+        if (Time.time >= nextUpdateTime)
+        {
+            if (!isInitialized && skeleton != null && skeleton.IsDataValid)
+            {
+                InitializeBones();
+            }
+            nextUpdateTime = Time.time + updateInterval;
+        }
     }
 }
 

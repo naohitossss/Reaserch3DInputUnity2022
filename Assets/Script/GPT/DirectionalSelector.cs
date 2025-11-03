@@ -2,22 +2,28 @@ using UnityEngine;
 
 public static class DirectionalSelector
 {
+    // キャッシュ用の配列を静的に保持
     private static readonly Vector3[] DirectionVectors = {
-        Vector3.right,      // 0: Right
-        Vector3.left,       // 1: Left
-        Vector3.up,         // 2: Up
-        Vector3.down,       // 3: Down
-        Vector3.forward,    // 4: Forward
-        Vector3.back        // 5: Back
+        Vector3.right,
+        Vector3.left,
+        Vector3.up,
+        Vector3.down,
+        Vector3.forward,
+        Vector3.back
     };
 
     public static int GetDirectionIndex(Vector3 start, Vector3 end)
     {
-        Vector3 direction = (end - start).normalized;
+        Vector3 direction = (end - start);
         float maxDot = float.MinValue;
-        int selectedIndex = 0;
+        int selectedIndex = -1;
 
-        // 各方向ベクトルとの内積を計算し、最も近い方向を選択
+        // マグニチュードの計算を1回だけ行う
+        float magnitude = direction.magnitude;
+        if (magnitude < 0.001f) return -1;
+
+        direction /= magnitude; // 正規化を1回だけ
+
         for (int i = 0; i < DirectionVectors.Length; i++)
         {
             float dot = Vector3.Dot(direction, DirectionVectors[i]);
@@ -28,13 +34,7 @@ public static class DirectionalSelector
             }
         }
 
-        // 内積が一定値以上の場合のみ方向を確定
-        if (maxDot > 0.7f) // cos(45度) ≒ 0.7
-        {
-            return selectedIndex;
-        }
-
-        return -1; // 方向が不明確な場合
+        return maxDot > 0.7f ? selectedIndex : -1;
     }
 
     // デバッグ用

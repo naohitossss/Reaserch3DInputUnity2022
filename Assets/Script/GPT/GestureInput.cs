@@ -46,6 +46,7 @@ public class GestureInput : MonoBehaviour
     public event Action OnUppercase;
     public event Action OnLowercase;
     public event Action OnSpace;
+    public event Action OnSpaceKey; // スペースキー入力イベント
 
     private bool prevFistGesture;
     private bool prevGoodGesture;
@@ -75,6 +76,21 @@ public class GestureInput : MonoBehaviour
     public int thumbWaveRequiredChanges = 4;
     [Tooltip("小指振りで必要な方向変化回数")]
     public int pinkyWaveRequiredChanges = 4;
+
+    private bool debugMode = false; // デバッグログを制御
+
+    // キャッシュ用の変数を追加
+    private Vector3 lastIndexPos;
+    private Vector3 lastMiddlePos;
+    private float updateThreshold = 0.001f; // 位置更新の閾値
+
+    private float gestureUpdateInterval = 0.1f; // 100msごとに更新
+    private float nextGestureUpdateTime = 0f;
+
+    private bool isGood; // クラスレベルで定義
+    private bool isWave;  // クラスレベルで定義
+    private bool isPinky; // クラスレベルで定義
+    private bool isFist;  // クラスレベルで定義
 
     void Start()
     {
@@ -111,46 +127,31 @@ public class GestureInput : MonoBehaviour
         if (!isInitialized)
         {
             InitializeBones();
-            return;
+            return; // 初期化が完了するまで他の処理をスキップ
         }
 
         bool middleNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Middle);
         bool indexNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Index);
+        bool pinkyNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky); // 小指のピンチを検出
+        bool ringNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Ring);  // 薬指のピンチを検出
 
         bool middlePinchDown = middleNow && !prevMiddlePinch;
         bool middlePinchUp = !middleNow && prevMiddlePinch;
         bool indexPinchDown = indexNow && !prevIndexPinch;
         bool indexPinchUp = !indexNow && prevIndexPinch;
+        bool pinkyPinchDown = pinkyNow && !prevPinkyGesture; // 小指のピンチ開始を検出
+        bool ringPinchDown = ringNow && !prevGoodGesture;    // 薬指のピンチ開始を検出
 
-        // === 新しいジェスチャーの検出 ===
-        bool isFist = IsFistGesture();
-        // ここを親指振り / 小指振り に変更
-        bool isGood = IsThumbWaveGesture();   // 親指振り -> 大文字
-        bool isPinky = IsPinkyWaveGesture();  // 小指振り -> 小文字
-        bool isWave = IsWaveGesture();
-
-        if (isWave && !prevWaveGesture)
+        // 小指のピンチでスペースキー入力をトリガー
+        if (pinkyPinchDown)
         {
-            OnBackspace?.Invoke();
-            if (debugLog) Debug.Log("🔙 Backspace triggered");
+            HandleSpaceKey();
         }
 
-        if (isGood && !prevGoodGesture)
+        // 薬指のピンチで大文字小文字変換をトリガー
+        if (ringPinchDown)
         {
-            OnUppercase?.Invoke();
-            if (debugLog) Debug.Log("🔠 Uppercase triggered");
-        }
-
-        if (isPinky && !prevPinkyGesture)
-        {
-            OnLowercase?.Invoke();
-            if (debugLog) Debug.Log("🔡 Lowercase triggered");
-        }
-
-        if (isFist && !prevFistGesture)
-        {
-            OnSpace?.Invoke();
-            if (debugLog) Debug.Log("␣ Space triggered");
+            HandleCaseToggle();
         }
 
         // === 各フェーズ ===
@@ -201,10 +202,8 @@ public class GestureInput : MonoBehaviour
 
         prevMiddlePinch = middleNow;
         prevIndexPinch = indexNow;
-        prevFistGesture = isFist;
-        prevGoodGesture = isGood;
-        prevPinkyGesture = isPinky;
-        prevWaveGesture = isWave;
+        prevPinkyGesture = pinkyNow; // 小指のピンチ状態を更新
+        prevGoodGesture = ringNow;  // 薬指のピンチ状態を更新
     }
 
     private void ResetState()
@@ -382,6 +381,22 @@ public class GestureInput : MonoBehaviour
 
         previousPinkyPosition = pos;
         return false;
+    }
+
+    private void HandleSpaceKey()
+    {
+        // スペースキー入力イベントをトリガー
+        OnSpaceKey?.Invoke();
+
+        // デバッグログ
+        Debug.Log("Space key triggered by ring finger pinch");
+    }
+
+    private void HandleCaseToggle()
+    {
+        // 大文字小文字変換イベントをトリガー
+        if (debugLog) Debug.Log("🔄 Case toggle triggered");
+        // 実際の変換処理はここに実装
     }
 }
 

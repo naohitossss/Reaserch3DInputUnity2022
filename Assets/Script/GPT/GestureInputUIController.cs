@@ -14,6 +14,11 @@ public class GestureInputUIController : MonoBehaviour
     public float categoryBlockDistance = 0.2f;
     public float keyBlockDistance = 0.15f;
     
+    [Header("Position Settings")]
+    public Camera mainCamera;  // VRカメラの参照
+    public float distanceFromCamera = 0.5f;  // カメラからの距離
+    public Vector2 offset = new Vector2(-0.4f, 0.4f);  // 左上へのオフセット
+
     private GameObject mainBlock;
     private GameObject[] categoryBlocks = new GameObject[6];
     private GameObject[] keyBlocks = new GameObject[6];
@@ -35,8 +40,12 @@ public class GestureInputUIController : MonoBehaviour
             gestureInput.OnCategorySelected += HandleCategorySelected;
             gestureInput.OnKeySelected += HandleKeySelected;
             
-            // UIの位置を設定
-            transform.position = gestureInput.uiPosition;
+            // カメラが設定されていない場合、メインカメラを取得
+            if (mainCamera == null)
+                mainCamera = Camera.main;
+
+            // UIの位置をカメラの左上に設定
+            UpdateUIPosition();
         }
         
         CreateMainBlock();
@@ -45,9 +54,26 @@ public class GestureInputUIController : MonoBehaviour
         UpdateUIState(GestureInput.InputPhase.Idle);
     }
 
+    void UpdateUIPosition()
+    {
+        if (mainCamera != null)
+        {
+            // カメラの前方ベクトルに距離を掛けて基準位置を得る
+            Vector3 basePosition = mainCamera.transform.position + 
+                                 mainCamera.transform.forward * distanceFromCamera;
+
+            // カメラの右と上のベクトルを使用してオフセットを適用
+            Vector3 offsetPosition = basePosition + 
+                                   mainCamera.transform.right * offset.x + 
+                                   mainCamera.transform.up * offset.y;
+
+            transform.position = offsetPosition;
+        }
+    }
+
     void CreateMainBlock()
     {
-        mainBlock = Instantiate(mainBlockPrefab, transform.position, Quaternion.identity);
+        mainBlock = Instantiate(mainBlockPrefab, transform.position, transform.rotation);
         mainBlock.transform.parent = transform;
     }
 
@@ -55,8 +81,8 @@ public class GestureInputUIController : MonoBehaviour
     {
         for (int i = 0; i < 6; i++)
         {
-            Vector3 position = transform.position + directions[i] * categoryBlockDistance;
-            categoryBlocks[i] = Instantiate(categoryBlockPrefab, position, Quaternion.identity);
+            Vector3 position = transform.position + transform.rotation * directions[i] * categoryBlockDistance;
+            categoryBlocks[i] = Instantiate(categoryBlockPrefab, position, transform.rotation);
             categoryBlocks[i].transform.parent = transform;
         }
     }
@@ -143,5 +169,11 @@ public class GestureInputUIController : MonoBehaviour
             gestureInput.OnCategorySelected -= HandleCategorySelected;
             gestureInput.OnKeySelected -= HandleKeySelected;
         }
+    }
+
+    void LateUpdate()
+    {
+        // 毎フレーム位置を更新してカメラに追従
+        UpdateUIPosition();
     }
 }
