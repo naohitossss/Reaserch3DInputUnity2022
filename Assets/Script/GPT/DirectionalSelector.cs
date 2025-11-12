@@ -34,7 +34,7 @@ public static class DirectionalSelector
             }
         }
 
-        return maxDot > 0.7f ? selectedIndex : -1;
+        return maxDot > 0.51f ? selectedIndex : -1;
     }
 
     // デバッグ用

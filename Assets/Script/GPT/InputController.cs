@@ -69,7 +69,7 @@ public class InputController : MonoBehaviour
     {
         if (InputManager.instance != null)
         {
-            InputManager.instance.ToggleShift();
+            InputManager.instance.SetShift(true); // ✅ 修正: 明示的に Shift ON
             Debug.Log("🔠 Shift Activated (Uppercase)");
         }
     }
@@ -78,7 +78,7 @@ public class InputController : MonoBehaviour
     {
         if (InputManager.instance != null)
         {
-            InputManager.instance.ToggleShift();
+            InputManager.instance.SetShift(false); // ✅ 修正: 明示的に Shift OFF
             Debug.Log("🔡 Shift Deactivated (Lowercase)");
         }
     }

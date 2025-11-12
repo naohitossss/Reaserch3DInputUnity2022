@@ -17,7 +17,7 @@ public class GestureInputUIController : MonoBehaviour
     [Header("Position Settings")]
     public Camera mainCamera;  // VRカメラの参照
     public float distanceFromCamera = 0.5f;  // カメラからの距離
-    public Vector2 offset = new Vector2(-0.4f, 0.4f);  // 左上へのオフセット
+    public Vector2 offset = new Vector2(-0.1f, 0.1f);  // 左上へのオフセット
 
     private GameObject mainBlock;
     private GameObject[] categoryBlocks = new GameObject[6];
@@ -44,8 +44,8 @@ public class GestureInputUIController : MonoBehaviour
             if (mainCamera == null)
                 mainCamera = Camera.main;
 
-            // UIの位置をカメラの左上に設定
-            UpdateUIPosition();
+            // UIの位置をカメラの左上に設定し、その位置で固定する
+            UpdateUIPosition(); // ✅ ここで一度だけ呼び出す
         }
         
         CreateMainBlock();
@@ -132,7 +132,8 @@ public class GestureInputUIController : MonoBehaviour
                     for (int i = 0; i < categoryBlocks.Length; i++)
                     {
                         categoryBlocks[i].SetActive(i == selectedCategory);
-                        categoryBlocks[i].transform.position = transform.position + directions[i] * categoryBlockDistance;
+                        // UIが固定位置なので、子オブジェクトも固定位置からの相対座標で計算
+                        categoryBlocks[i].transform.localPosition = directions[i] * categoryBlockDistance;
                     }
                     
                     // キーブロックは非表示
@@ -149,12 +150,13 @@ public class GestureInputUIController : MonoBehaviour
                 {
                     // 選択されたカテゴリーブロックを表示
                     categoryBlocks[selectedCategory].SetActive(true);
-                    Vector3 categoryPos = categoryBlocks[selectedCategory].transform.position;
+                    // UIが固定位置なので、子オブジェクトも固定位置からの相対座標で計算
+                    Vector3 categoryLocalPos = categoryBlocks[selectedCategory].transform.localPosition;
 
                     // 選択されたキーブロックとその位置を設定
                     for (int i = 0; i < keyBlocks.Length; i++)
                     {
-                        keyBlocks[i].transform.position = categoryPos + directions[i] * keyBlockDistance;
+                        keyBlocks[i].transform.localPosition = categoryLocalPos + directions[i] * keyBlockDistance;
                         keyBlocks[i].SetActive(i == selectedIndex);
                     }
                 }
@@ -169,11 +171,5 @@ public class GestureInputUIController : MonoBehaviour
             gestureInput.OnCategorySelected -= HandleCategorySelected;
             gestureInput.OnKeySelected -= HandleKeySelected;
         }
-    }
-
-    void LateUpdate()
-    {
-        // 毎フレーム位置を更新してカメラに追従
-        UpdateUIPosition();
     }
 }
