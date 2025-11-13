@@ -1,116 +1,100 @@
 using UnityEngine;
-using TMPro; // TextMeshProUGUIを使用
+using TMPro;
 
-public class SimpleKeyboardCaller : MonoBehaviour
+public class KeyboardTestController : MonoBehaviour
 {
     // --- インスペクター設定 ---
-    [Header("表示するTextコンポーネント")]
-    [Tooltip("入力結果を表示する TextMeshProUGUI コンポーネントを割り当ててください。")]
-    public TextMeshProUGUI targetText;
+    [SerializeField] private TextMeshProUGUI textMeshProUGUI;
     
-    [Header("キーボードを呼び出すボタン")]
-    [Tooltip("キーボード表示をトリガーするボタンを指定します。例: OVRInput.RawButton.A")]
-    public OVRInput.RawButton triggerButton = OVRInput.RawButton.A; 
+    [Header("PCキーボード設定")]
+    [Tooltip("キーボードを呼び出すPCキーボードのキー")]
+    // 'Q' キーを使用
+    public KeyCode triggerKey = KeyCode.Q; 
     
-    // --- プライベート変数 ---
-    private TouchScreenKeyboard systemKeyboard; 
-    private string currentInputText = "新しい入力"; // キーボードに表示する初期テキスト
+    private TouchScreenKeyboard overlayKeyboard;
 
-    void Update()
+    private void Start()
     {
-        // 1. キーボードが開いていないときのみ、ボタン入力をチェック
-        if (systemKeyboard == null)
+        if (textMeshProUGUI != null)
         {
-            CheckForKeyboardTrigger();
-        }
-        // 2. キーボードが開いている場合は、状態をチェックし、入力結果を処理
-        else
-        {
-            HandleKeyboardState();
+            // 初期テキストがnullでないことを保証
+            textMeshProUGUI.text = textMeshProUGUI.text ?? ""; 
         }
     }
 
-    private void CheckForKeyboardTrigger()
+    private void Update()
     {
-        // コントローラーのボタンが押された瞬間 (Down) にキーボードを呼び出す
-        if (OVRInput.GetDown(triggerButton)) 
+        // 1. キーボードが開いていない場合、PCキーボード入力をチェック
+        if (overlayKeyboard == null)
         {
-            OpenSystemKeyboard();
+            CheckPCKeyboardInput();
+            return;
+        }
+
+        // 2. キーボードが開いている場合、状態をチェック
+        TouchScreenKeyboard.Status keyboardStatus = overlayKeyboard.status;
+
+        // キーボードが閉じられた場合 (完了、キャンセル、または非表示)
+        if (keyboardStatus != TouchScreenKeyboard.Status.Visible)
+        {
+            HandleKeyboardClosed(keyboardStatus);
         }
     }
 
-    /// <summary>
-    /// Unity標準の TouchScreenKeyboard.Open() を使用してシステムキーボードを呼び出す。
-    /// </summary>
-    public void OpenSystemKeyboard()
+    private void CheckPCKeyboardInput()
     {
-        Debug.Log("--- キーボード呼び出しを試行 ---");
-        // TouchScreenKeyboard.Open() を使用。
-        // Meta Quest環境では、これがVRシステムキーボード（エアキーボード）としてオーバーレイ表示されます。
-        systemKeyboard = TouchScreenKeyboard.Open(
-            currentInputText,              // 初期テキスト
-            TouchScreenKeyboardType.Default, // キーボードの種類
-            false,                         // オートコレクト
-            false,                         // 複数行
-            false,                         // パスワード入力（非表示）
-            false,                         // アラート
-            "文字を入力してください"         // プレースホルダーテキスト
+        // 設定されたPCキー（KeyCode.Q）が押された瞬間をチェック
+        // Input.GetKeyDownはUnity Editor上でのデバッグに有効です。
+        if (Input.GetKeyDown(triggerKey))
+        {
+            OpenSystemKeyboard(); // キーボード呼び出しメソッドを実行
+        }
+    }
+
+    void OpenSystemKeyboard()
+    {
+        // キーボードがすでに開いている場合は、何もしない
+        if (overlayKeyboard != null) return;
+
+        // TouchScreenKeyboard.Open() でキーボードを呼び出す
+        string initialText = textMeshProUGUI != null ? textMeshProUGUI.text : "";
+        
+        overlayKeyboard = TouchScreenKeyboard.Open(
+            initialText, 
+            TouchScreenKeyboardType.Default,
+            false, 
+            false, 
+            false, 
+            false, 
+            "テキストを入力してください"
         );
 
-        // ※注意: TouchScreenKeyboard.Open() はキーボードの「表示位置」を指定できません。
-        // 通常、キーボードはHMDに対して固定の位置に表示されます。
-        
-        if (systemKeyboard == null)
-        {
-            Debug.LogError("システムキーボードの呼び出しに失敗しました。OVRManagerの設定を確認してください。");
-        }
+        Debug.Log($"--- PCキーボードの '{triggerKey.ToString()}' キーで呼び出しを試行 ---");
     }
 
-    /// <summary>
-    /// キーボードの状態（入力中、完了、キャンセル）を処理し、結果をUIに反映する。
-    /// </summary>
-    private void HandleKeyboardState()
-{
-    if (systemKeyboard != null)
+    void HandleKeyboardClosed(TouchScreenKeyboard.Status status)
     {
-        // ユーザーが入力中のテキストを随時更新
-        currentInputText = systemKeyboard.text;
+        string finalInput = overlayKeyboard.text;
 
-        // キーボードの状態を取得
-        TouchScreenKeyboard.Status keyboardStatus = systemKeyboard.status;
-
-        // キーボードが閉じられたか（完了、キャンセル、または非表示）をチェック
-        if (keyboardStatus != TouchScreenKeyboard.Status.Visible) 
+        if (status == TouchScreenKeyboard.Status.Done)
         {
-            if (keyboardStatus == TouchScreenKeyboard.Status.Done)
-            {
-                // 入力完了時の処理
-                if (targetText != null)
-                {
-                    targetText.text = "入力結果 (完了): " + currentInputText;
-                }
-                Debug.Log("入力完了。結果: " + currentInputText);
-            }
-            else if (keyboardStatus == TouchScreenKeyboard.Status.Canceled)
-            {
-                // 入力キャンセル時の処理
-                if (targetText != null)
-                {
-                    targetText.text = "入力キャンセルされました。";
-                }
-                Debug.Log("入力キャンセル。");
-                
-                // キャンセルの場合、currentInputTextをリセットする選択肢もある
-                // currentInputText = ""; 
-            }
-            else // Hidden (システムによる非表示など) の場合
-            {
-                Debug.Log("キーボードが非表示になりました (状態: " + keyboardStatus.ToString() + ")");
-            }
-            
-            // キーボードの状態をリセット
-            systemKeyboard = null; 
+            // 入力確定時: 最終結果をUIに反映
+            if (textMeshProUGUI != null) textMeshProUGUI.text = finalInput;
+            Debug.Log("入力完了。結果: " + finalInput);
         }
+        else if (status == TouchScreenKeyboard.Status.Canceled)
+        {
+            // 入力キャンセル時: 元のテキストを維持
+            Debug.Log("入力キャンセルされました。元のテキストを維持します。");
+        }
+        else
+        {
+            // Hiddenなどのその他の状態: 念のため最終結果を反映
+            if (textMeshProUGUI != null) textMeshProUGUI.text = finalInput;
+            Debug.Log("キーボードが閉じられました (状態: " + status.ToString() + ")");
+        }
+
+        // キーボードのインスタンスをリセット
+        overlayKeyboard = null;
     }
-}
 }
