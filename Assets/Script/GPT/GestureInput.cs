@@ -7,8 +7,8 @@ public class GestureInput : MonoBehaviour
     {
         Idle,
         CategoryReady,     // 中指ピンチ開始 -> 中指ピンチ中
-        CategorySelected,  // 中指ピンチ解除 -> キー選択待機中 (Shift選択待ち)
-        KeySelecting       // 人差し指/薬指ピンチ開始 -> ピンチ中
+        CategorySelected,  // 中指ピンチ解除 -> キー選択待機中
+        KeySelecting       // 人差し指/薬指曲げ開始 -> 曲げ維持中
     }
 
     public InputPhase CurrentPhase { get; private set; } = InputPhase.Idle;
@@ -22,9 +22,20 @@ public class GestureInput : MonoBehaviour
     public Transform worldCenter;
 
     [Header("Parameters")]
-    public float moveThreshold = 0.02f;
+    public float moveThreshold = 0.04f;
     public bool debugLog = true;
-    private float updateThreshold = 0.005f; // 位置更新の閾値
+
+    // ✅ 追加: 各指の曲がり具合の閾値設定
+    [Header("Gesture Settings (Bend Thresholds)")]
+    [Tooltip("人差し指（小文字）の曲がり判定閾値")]
+    [Range(0.0f, 1.0f)]
+    public float indexBendThreshold = 0.6f;
+    [Tooltip("薬指（大文字）の曲がり判定閾値")]
+    [Range(0.0f, 1.0f)]
+    public float ringBendThreshold = 0.6f;
+    [Tooltip("小指（スペース）の曲がり判定閾値")]
+    [Range(0.0f, 1.0f)]
+    public float pinkyBendThreshold = 0.8f;
 
     [Header("UI Settings")]
     [Tooltip("UIブロックの生成位置。手の操作がしやすい場所に設定。")]
@@ -38,13 +49,14 @@ public class GestureInput : MonoBehaviour
     private bool isInitialized;
 
     private bool prevMiddlePinch;
-    private bool prevIndexPinch;
-    private bool prevPinkyPinch;
-    private bool prevRingPinch;
+    
+    // ✅ 追加: 前フレームの曲がり状態を保持する変数
+    private bool prevIndexBent;
+    private bool prevRingBent;
+    private bool prevPinkyBent;
 
     private Vector3 categoryStartPos;
-    // カテゴリ選択の終了位置を保持するための変数 (中指ピンチ解除時の位置)
-    private Vector3 categoryEndPosAtMiddlePinchUp; 
+    private Vector3 categoryEndPosAtMiddlePinchUp;
     private Vector3 keyStartPos;
 
     public event Action<Vector3, Vector3> OnCategorySelected;
@@ -57,34 +69,21 @@ public class GestureInput : MonoBehaviour
 
     // バックスペース用ジェスチャーの状態
     private Vector3 previousHandPosition;
-    private float waveDetectionTime = 0.5f; // 検出に必要な時間
+    private float waveDetectionTime = 1f; // 検出に必要な時間
     private float waveStartTime;
     private int waveDirectionChanges = 0; // 左右の移動回数
     private float lastWaveDirection = 0; // 前回の移動方向
 
-    // 親指・小指用の振り検出用状態 (未使用だが残しておく)
-    private Vector3 previousThumbPosition;
-    private int thumbWaveDirectionChanges = 0;
-    private float thumbLastWaveDirection = 0;
-    private float thumbWaveStartTime;
-    private Vector3 previousPinkyPosition;
-    private int pinkyWaveDirectionChanges = 0;
-    private float pinkyLastWaveDirection = 0;
-    private float pinkyWaveStartTime;
-
     [Header("Wave Settings")]
-    [Tooltip("親指振りで必要な方向変化回数")]
-    public int thumbWaveRequiredChanges = 4;
-    [Tooltip("小指振りで必要な方向変化回数")]
-    public int pinkyWaveRequiredChanges = 4;
-
-    private bool debugMode = false; // デバッグログを制御 (未使用)
+    [Tooltip("手を振る動作で必要な方向変化回数")]
+    public int waveRequiredChanges = 4;
 
     // キャッシュ用の変数を追加 (未使用だが残しておく)
     private Vector3 lastIndexPos;
     private Vector3 lastMiddlePos;
-
-    private float gestureUpdateInterval = 0.005f; // 100msごとに更新 (未使用)
+    private float updateThreshold = 0.001f; // 位置更新の閾値
+    [SerializeField]
+    private float gestureUpdateInterval = 0.016f; // 100msごとに更新 (未使用)
     private float nextGestureUpdateTime = 0f;
 
     [SerializeField]
@@ -124,7 +123,7 @@ public class GestureInput : MonoBehaviour
                 ringTip = bone.Transform;
         }
 
-        if (indexTip && middleTip && ringTip)
+        if (indexTip && middleTip && ringTip && pinkyTip)
         {
             isInitialized = true;
             if (debugLog) Debug.Log("HandTracker initialized");
@@ -139,126 +138,126 @@ public class GestureInput : MonoBehaviour
             return;
         }
 
+        // --- 中指のピンチ（接触）判定（カテゴリ選択用） ---
         bool middleNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Middle);
-        bool indexNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Index);
-        bool pinkyNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky);
-        bool ringNow = hand.GetFingerIsPinching(OVRHand.HandFinger.Ring);
-
         bool middlePinchDown = middleNow && !prevMiddlePinch;
-        bool middlePinchUp = !middleNow && prevMiddlePinch; // 中指ピンチ解除を検出
-        bool indexPinchDown = indexNow && !prevIndexPinch;
-        bool indexPinchUp = !indexNow && prevIndexPinch;   // 人差し指ピンチ解除を検出
-        bool pinkyPinchDown = pinkyNow && !prevPinkyPinch;
-        bool ringPinchDown = ringNow && !prevRingPinch;
-        bool ringPinchUp = !ringNow && prevRingPinch;     // 薬指ピンチ解除を検出
+        bool middlePinchUp = !middleNow && prevMiddlePinch;
 
+        // --- ✅ 修正: 指の曲がり具合による判定 ---
+        // 各指のピンチ強度（曲がり具合 0.0〜1.0）を取得
+        float indexStrength = hand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
+        float ringStrength = hand.GetFingerPinchStrength(OVRHand.HandFinger.Ring);
+        float pinkyStrength = hand.GetFingerPinchStrength(OVRHand.HandFinger.Pinky);
 
-        // 小指のピンチでスペースキー入力
-        if (pinkyPinchDown)
+        // 閾値判定
+        bool indexBentNow = indexStrength > indexBendThreshold;
+        bool ringBentNow = ringStrength > ringBendThreshold;
+        bool pinkyBentNow = pinkyStrength > pinkyBendThreshold;
+
+        // 曲げ開始（Down）と解除（Up）の検出
+        bool indexBentDown = indexBentNow && !prevIndexBent;
+        bool indexBentUp = !indexBentNow && prevIndexBent;
+        bool ringBentDown = ringBentNow && !prevRingBent;
+        bool ringBentUp = !ringBentNow && prevRingBent;
+        bool pinkyBentDown = pinkyBentNow && !prevPinkyBent;
+
+        // --- 小指の曲げでスペースキー入力 ---
+        // ✅ 修正: 曲がり具合が 0.8 を超えた瞬間に反応
+        if (pinkyBentDown)
         {
             HandleSpaceKey();
+            // if (debugLog) Debug.Log($"Pinky bend strength: {pinkyStrength:F2}"); // デバッグ用
         }
 
         // === 各フェーズ ===
         switch (CurrentPhase)
         {
             case InputPhase.Idle:
-                if (middlePinchDown)
+                if (middlePinchDown) // カテゴリ選択は引き続き中指の接触ピンチで開始
                 {
                     categoryStartPos = middleTip.position;
-                    CurrentPhase = InputPhase.CategoryReady; // 中指ピンチ中
+                    CurrentPhase = InputPhase.CategoryReady;
                     if (debugLog) Debug.Log("🟢 Category gesture started (middle pinch down)");
                 }
                 break;
 
-            case InputPhase.CategoryReady: // 中指ピンチが続いている状態
-                if (middlePinchUp) // 中指ピンチが解除されたらカテゴリを決定
+            case InputPhase.CategoryReady:
+                if (middlePinchUp) // 中指ピンチ解除でカテゴリ決定
                 {
-                    categoryEndPosAtMiddlePinchUp = middleTip.position; // 中指ピンチ解除時の位置を記録
-
+                    categoryEndPosAtMiddlePinchUp = middleTip.position;
                     float distance = Vector3.Distance(categoryStartPos, categoryEndPosAtMiddlePinchUp);
 
                     if (distance > moveThreshold)
                     {
-                        // ここではまだ方向を判定しきらず、CategorySelectedに移行
-                        // 方向の判定とOnCategorySelectedの発火はKeySelectingのピンチアップ時に行う
-                        
-                        CurrentPhase = InputPhase.CategorySelected; // カテゴリは選択済み、キー選択待ち
+                        CurrentPhase = InputPhase.CategorySelected;
                         if (debugLog) Debug.Log("✅ Category direction recorded. Awaiting key gesture.");
                     }
                     else
                     {
-                        // 移動が小さすぎる場合はリセット
                         ResetState();
                         if (debugLog) Debug.LogWarning("Category gesture too small. Resetting state.");
                     }
                 }
-                // 中指ピンチが続いている間は、何もしない
                 break;
 
-            case InputPhase.CategorySelected: // カテゴリ方向は決まっているが、Shiftとキー選択待ち
-                // ここで人差し指または薬指のピンチダウンを待つ
-                if (indexPinchDown || ringPinchDown)
+            case InputPhase.CategorySelected:
+                // ✅ 修正: 人差し指または薬指の「曲げ開始」を待つ
+                if (indexBentDown || ringBentDown)
                 {
-                    // Shift状態の確定
-                    if (indexPinchDown)
+                    if (indexBentDown)
                     {
-                        OnLowercase?.Invoke(); // Shift Off/小文字モードへ
-                        keyStartPos = indexTip.position; // keyStartPos を人差し指ピンチ開始位置に設定
-                        if (debugLog) Debug.Log("Key gesture started with Index Pinch. (Lowercase)");
+                        OnLowercase?.Invoke(); // 小文字モード
+                        keyStartPos = indexTip.position;
+                        if (debugLog) Debug.Log("Key gesture started with Index Bend (Lowercase)");
                     }
-                    else // ringPinchDown
+                    else // ringBentDown
                     {
-                        OnUppercase?.Invoke(); // Shift On/大文字モードへ
-                        keyStartPos = ringTip.position; // keyStartPos を薬指ピンチ開始位置に設定
-                        if (debugLog) Debug.Log("Key gesture started with Ring Pinch. (Uppercase)");
+                        OnUppercase?.Invoke(); // 大文字モード
+                        keyStartPos = ringTip.position;
+                        if (debugLog) Debug.Log($"Key gesture started with Ring Bend (Uppercase, strength: {ringStrength:F2})");
                     }
-                    CurrentPhase = InputPhase.KeySelecting; // キー選択中
+                    CurrentPhase = InputPhase.KeySelecting;
                 }
-                // このフェーズで中指が再度ピンチされた場合は、新しいカテゴリ選択を開始すべきか、あるいはエラーとするか？
-                // 現状ではIdleに戻るまで待機。
                 break;
 
-            case InputPhase.KeySelecting: // 人差し指/薬指ピンチが続いている状態
-                // ピンチを解除したらキーを決定
-                if (indexPinchUp || ringPinchUp)
+            case InputPhase.KeySelecting:
+                // ✅ 修正: 人差し指または薬指の「曲げ解除」を待つ
+                if (indexBentUp || ringBentUp)
                 {
                     Vector3 keyEndPos;
-                    // どちらの指を解除したかに関わらず、最後にピンチしていた指の解除位置をキー選択の終点とする
-                    if (prevIndexPinch) // indexPinchUpが真なので、前回はindexPinchだった
+                    // どちらの指を解除したか判定（前回曲がっていた方の指を使用）
+                    if (prevIndexBent)
                     {
                         keyEndPos = indexTip.position;
                     }
-                    else // ringPinchUpが真なので、前回はringPinchだった
+                    else // prevRingBent
                     {
                         keyEndPos = ringTip.position;
                     }
                     
                     if (Vector3.Distance(keyStartPos, keyEndPos) > moveThreshold)
                     {
-                        // ここで中指ジェスチャーで得られた方向（categoryStartPos, categoryEndPosAtMiddlePinchUp）と
-                        // 人差し指/薬指ジェスチャーで得られた方向（keyStartPos, keyEndPos）を組み合わせて
-                        // InputControllerに通知する。
-                        OnCategorySelected?.Invoke(categoryStartPos, categoryEndPosAtMiddlePinchUp); // 中指ジェスチャーで決定したカテゴリ
-                        OnKeySelected?.Invoke(keyStartPos, keyEndPos);                             // 人差し指/薬指ジェスチャーで決定したキー
-
-                        if (debugLog) Debug.Log("🔡 Key Selected (Pinch Up)");
+                        OnCategorySelected?.Invoke(categoryStartPos, categoryEndPosAtMiddlePinchUp);
+                        OnKeySelected?.Invoke(keyStartPos, keyEndPos);
+                        if (debugLog) Debug.Log("🔡 Key Selected (Bend Up)");
                     }
                     else
                     {
                         if (debugLog) Debug.LogWarning("Key gesture too small. Not selecting key.");
                     }
-                    ResetState(); // 入力完了後、状態をリセット
+                    ResetState();
                 }
                 break;
         }
 
+        // 状態更新
         prevMiddlePinch = middleNow;
-        prevIndexPinch = indexNow;
-        prevPinkyPinch = pinkyNow;
-        prevRingPinch = ringNow;
+        // ✅ 追加: 曲がり状態を更新
+        prevIndexBent = indexBentNow;
+        prevRingBent = ringBentNow;
+        prevPinkyBent = pinkyBentNow;
 
-        // 手を振るジェスチャーの検出（バックスペース用）
+        // バックスペース判定（変更なし）
         if (IsWaveGesture())
         {
             OnBackspace?.Invoke();
@@ -269,200 +268,62 @@ public class GestureInput : MonoBehaviour
     private void ResetState()
     {
         CurrentPhase = InputPhase.Idle;
-        // その他の状態変数もリセットが必要ならここに追加
         categoryStartPos = Vector3.zero;
-        categoryEndPosAtMiddlePinchUp = Vector3.zero; // 追加
+        categoryEndPosAtMiddlePinchUp = Vector3.zero;
         keyStartPos = Vector3.zero;
     }
 
-    // IsFistGesture, IsGoodGesture, IsPinkyGesture は現在のシステムでは未使用
-
+    // ... (IsWaveGesture などのメソッドは変更なし) ...
     private bool IsWaveGesture()
     {
-        // 他のフェーズ中は手を振るジェスチャーを無効化
-        if (CurrentPhase != InputPhase.Idle)
-        {
-            return false;
-        }
+        if (CurrentPhase != InputPhase.Idle) return false;
 
         Vector3 currentHandPosition = hand.PointerPose.position;
 
-        // 初回の位置を記録
         if (previousHandPosition == Vector3.zero)
         {
             previousHandPosition = currentHandPosition;
             waveStartTime = Time.time;
-            waveDirectionChanges = 0; // 追加: 新しいジェスチャー開始時にリセット
-            lastWaveDirection = 0;    // 追加: 新しいジェスチャー開始時にリセット
+            waveDirectionChanges = 0; 
+            lastWaveDirection = 0;    
             return false;
         }
 
-        // 現在の移動方向を計算
         float currentDirection = currentHandPosition.x - previousHandPosition.x;
 
-        // 移動方向が変わった場合
         if (Mathf.Sign(currentDirection) != Mathf.Sign(lastWaveDirection) && Mathf.Abs(currentDirection) > moveThreshold)
         {
             waveDirectionChanges++;
             lastWaveDirection = currentDirection;
 
-            // 一定回数以上方向が変わったらジェスチャーを検出
-            if (waveDirectionChanges >= 4) // 例: 左右2回ずつで4回
+            if (waveDirectionChanges >= waveRequiredChanges)
             {
-                waveDirectionChanges = 0; // リセット
-                previousHandPosition = Vector3.zero; // リセット
+                waveDirectionChanges = 0; 
+                previousHandPosition = Vector3.zero; 
                 return true;
             }
         }
 
-        // 一定時間内に方向変化がなければリセット
         if (Time.time - waveStartTime > waveDetectionTime)
         {
             waveDirectionChanges = 0;
             waveStartTime = Time.time;
-            lastWaveDirection = 0; // 追加: リセット時に方向もリセット
+            lastWaveDirection = 0; 
         }
 
         previousHandPosition = currentHandPosition;
         return false;
     }
 
-    // 以下は未使用のジェスチャー検出だが、もし必要なら活性化
-    /*
-    private bool IsFistGesture()
-    {
-        return hand.GetFingerIsPinching(OVRHand.HandFinger.Index) &&
-               hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
-               hand.GetFingerIsPinching(OVRHand.HandFinger.Ring) &&
-               hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky);
-    }
-
-    private bool IsGoodGesture()
-    {
-        return hand.GetFingerIsPinching(OVRHand.HandFinger.Thumb) &&
-               !hand.GetFingerIsPinching(OVRHand.HandFinger.Index) &&
-               !hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
-               !hand.GetFingerIsPinching(OVRHand.HandFinger.Ring) &&
-               !hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky);
-    }
-
-    private bool IsPinkyGesture()
-    {
-        return hand.GetFingerIsPinching(OVRHand.HandFinger.Pinky) &&
-               !hand.GetFingerIsPinching(OVRHand.HandFinger.Index) &&
-               !hand.GetFingerIsPinching(OVRHand.HandFinger.Middle) &&
-               !hand.GetFingerIsPinching(OVRHand.HandFinger.Ring);
-    }
-
-    private bool IsThumbWaveGesture()
-    {
-        if (CurrentPhase != InputPhase.Idle) return false;
-        if (thumbTip == null) return false;
-
-        Vector3 pos = thumbTip.position;
-
-        if (previousThumbPosition == Vector3.zero)
-        {
-            previousThumbPosition = pos;
-            thumbWaveStartTime = Time.time;
-            thumbLastWaveDirection = 0;
-            thumbWaveDirectionChanges = 0;
-            return false;
-        }
-
-        float dir = pos.x - previousThumbPosition.x;
-
-        if (Mathf.Abs(dir) > moveThreshold)
-        {
-            if (thumbLastWaveDirection == 0)
-            {
-                thumbLastWaveDirection = dir;
-            }
-            else if (Mathf.Sign(dir) != Mathf.Sign(thumbLastWaveDirection))
-            {
-                thumbWaveDirectionChanges++;
-                thumbLastWaveDirection = dir;
-
-                if (thumbWaveDirectionChanges >= thumbWaveRequiredChanges)
-                {
-                    thumbWaveDirectionChanges = 0;
-                    previousThumbPosition = Vector3.zero;
-                    thumbLastWaveDirection = 0;
-                    return true;
-                }
-            }
-        }
-
-        if (Time.time - thumbWaveStartTime > waveDetectionTime)
-        {
-            thumbWaveDirectionChanges = 0;
-            thumbWaveStartTime = Time.time;
-            thumbLastWaveDirection = 0;
-        }
-
-        previousThumbPosition = pos;
-        return false;
-    }
-
-    private bool IsPinkyWaveGesture()
-    {
-        if (CurrentPhase != InputPhase.Idle) return false;
-        if (pinkyTip == null) return false;
-
-        Vector3 pos = pinkyTip.position;
-
-        if (previousPinkyPosition == Vector3.zero)
-        {
-            previousPinkyPosition = pos;
-            pinkyWaveStartTime = Time.time;
-            pinkyLastWaveDirection = 0;
-            pinkyWaveDirectionChanges = 0;
-            return false;
-        }
-
-        float dir = pos.x - previousPinkyPosition.x;
-
-        if (Mathf.Abs(dir) > moveThreshold)
-        {
-            if (pinkyLastWaveDirection == 0)
-            {
-                pinkyLastWaveDirection = dir;
-            }
-            else if (Mathf.Sign(dir) != Mathf.Sign(pinkyLastWaveDirection))
-            {
-                pinkyWaveDirectionChanges++;
-                pinkyLastWaveDirection = dir;
-
-                if (pinkyWaveDirectionChanges >= pinkyWaveRequiredChanges)
-                {
-                    pinkyWaveDirectionChanges = 0;
-                    previousPinkyPosition = Vector3.zero;
-                    pinkyLastWaveDirection = 0;
-                    return true;
-                }
-            }
-        }
-
-        if (Time.time - pinkyWaveStartTime > waveDetectionTime)
-        {
-            pinkyWaveDirectionChanges = 0;
-            pinkyWaveStartTime = Time.time;
-            pinkyLastWaveDirection = 0;
-        }
-
-        previousPinkyPosition = pos;
-        return false;
-    }
-    */
     private void HandleSpaceKey()
     {
-        // InputManagerが存在する場合のみスペース入力を実行
         if (inputManager != null)
         {
             inputManager.Space();
             OnSpace?.Invoke();
             OnSpaceKey?.Invoke();
-            if (debugLog) Debug.Log("Space key triggered by pinky pinch");
+            // ✅ ログメッセージも修正
+            if (debugLog) Debug.Log("Space key triggered by **pinky bend** gesture");
         }
         else
         {
