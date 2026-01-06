@@ -1,11 +1,14 @@
 using UnityEngine;
 using System;
+using TMPro;
 
 public class InputController : MonoBehaviour
 {
+    [Header("External References")]
     public GestureInput gestureManager;
+    public InputManager inputManager;
+    public TMP_InputField inputField;
 
-    private readonly string[] categories = { "1", "2", "3", "4", "5", "6" };
     private readonly string[,] keys =
     {
         { "1", "A", "B", "C", "D", "E" },
@@ -21,47 +24,75 @@ public class InputController : MonoBehaviour
 
     private int currentCategory = -1;
 
+    // シフト状態を管理するフラグ
+    private bool isShift = false;
+
     void Start()
     {
+        if (inputManager == null)
+        {
+            inputManager = FindObjectOfType<InputManager>();
+            if (inputManager == null)
+            {
+                Debug.LogError("[DEBUG] InputController: InputManagerが見つかりません！");
+            }
+        }
+
         if (gestureManager != null)
         {
             gestureManager.OnCategorySelected += OnCategorySelected;
             gestureManager.OnKeySelected += OnKeySelected;
             gestureManager.OnBackspace += OnBackspace;
-            gestureManager.OnUppercase += OnUppercase;
-            gestureManager.OnLowercase += OnLowercase;
 
-            // ▼▼▼【重要】ここを追加 ▼▼▼
-            // スペース入力イベントを購読します。
-            // ※ 'OnSpaceKey' というイベント名が GestureInput 側に存在している前提です。
-            // もしエラーになる場合は、GestureInput.cs を確認し、正しいイベント名（例: OnSpace）に修正してください。
-            gestureManager.OnSpaceKey += OnSpaceInput;
-            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+            if (gestureManager.GetType().GetEvent("OnSpaceKey") != null)
+            {
+                gestureManager.GetType().GetEvent("OnSpaceKey").AddEventHandler(gestureManager, new Action(OnSpace));
+            }
+
+            // ▼▼▼ 追加：シフト（大文字/小文字）イベントの購読 ▼▼▼
+            // GestureInput側にこれらのイベントが定義されている前提です
+            gestureManager.OnUppercase += SetShiftOn;
+            gestureManager.OnLowercase += SetShiftOff;
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         }
     }
 
-    // ▼▼▼【重要】ここを追加 ▼▼▼
-    // スペース入力時に呼ばれるメソッド
-    void OnSpaceInput()
+    void OnDestroy()
     {
-        if (InputManager.instance != null)
+        if (gestureManager != null)
         {
-            // InputManagerを通してスペースを入力
-            // ※InputManagerに 'Space()' メソッドが存在する前提です。
-            // なければ AppendCharacter(" ") などに置き換えてください。
-            InputManager.instance.Space(); 
+            gestureManager.OnCategorySelected -= OnCategorySelected;
+            gestureManager.OnKeySelected -= OnKeySelected;
+            gestureManager.OnBackspace -= OnBackspace;
+            if (gestureManager.GetType().GetEvent("OnSpaceKey") != null)
+            {
+                gestureManager.GetType().GetEvent("OnSpaceKey").RemoveEventHandler(gestureManager, new Action(OnSpace));
+            }
 
-            // チュートリアル用にイベントを発火（半角スペースを通知）
-            OnCharacterInputted?.Invoke(" ");
-            Debug.Log("␣ Space Inputted");
+            // ▼▼▼ 追加：イベント購読解除 ▼▼▼
+            gestureManager.OnUppercase -= SetShiftOn;
+            gestureManager.OnLowercase -= SetShiftOff;
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
         }
     }
-    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+    // ▼▼▼ 追加：シフト状態切り替えハンドラ ▼▼▼
+    private void SetShiftOn()
+    {
+        isShift = true;
+        // Debug.Log("[DEBUG] Shift ON (Uppercase)");
+    }
+
+    private void SetShiftOff()
+    {
+        isShift = false;
+        // Debug.Log("[DEBUG] Shift OFF (Lowercase)");
+    }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
     void OnCategorySelected(Vector3 start, Vector3 end)
     {
         currentCategory = DirectionalSelector.GetDirectionIndex(start, end);
-        Debug.Log($" Category Selected: {categories[currentCategory]}");
     }
 
     void OnKeySelected(Vector3 start, Vector3 end)
@@ -69,43 +100,42 @@ public class InputController : MonoBehaviour
         if (currentCategory < 0) return;
 
         int keyIndex = DirectionalSelector.GetDirectionIndex(start, end);
-        string key = keys[currentCategory, keyIndex];
+        string keyStr = keys[currentCategory, keyIndex];
 
-        Debug.Log($"🔡 Key Selected: {key}");
+        // ここで isShift フラグを使って大文字/小文字を決定します
+        char inputChar = isShift ? char.ToUpper(keyStr[0]) : char.ToLower(keyStr[0]);
 
-        if (InputManager.instance != null)
+        // Debug.Log($"[DEBUG] InputController: キー選択検知: {inputChar} (Shift: {isShift})");
+
+        if (inputField != null)
         {
-            InputManager.instance.AppendCharacter(key);
-            // 簡易的に入力文字をそのまま通知
-            OnCharacterInputted?.Invoke(key);
+            inputField.text += inputChar;
         }
+
+        if (inputManager != null)
+        {
+            inputManager.ProcessInput(inputChar);
+        }
+
+        OnCharacterInputted?.Invoke(inputChar.ToString());
 
         currentCategory = -1;
     }
 
+    public void OnSpace()
+    {
+        // Debug.Log($"[DEBUG] InputController: スペース入力検知");
+        if (inputField != null) inputField.text += ' ';
+        if (inputManager != null) inputManager.ProcessInput(' ');
+        OnCharacterInputted?.Invoke(" ");
+    }
+
     void OnBackspace()
     {
-        if (InputManager.instance != null)
+        // InputFieldのみ反映（InputManager側は進む仕様なので戻さない）
+        if (inputField != null && inputField.text.Length > 0)
         {
-            InputManager.instance.Backspace();
-        }
-    }
-
-    void OnUppercase()
-    {
-        if (InputManager.instance != null)
-        {
-            InputManager.instance.SetShift(true);
-            Debug.Log("🔠 Shift Activated (Uppercase)");
-        }
-    }
-
-    void OnLowercase()
-    {
-        if (InputManager.instance != null)
-        {
-            InputManager.instance.SetShift(false);
-            Debug.Log("🔡 Shift Deactivated (Lowercase)");
+            inputField.text = inputField.text.Substring(0, inputField.text.Length - 1);
         }
     }
 }

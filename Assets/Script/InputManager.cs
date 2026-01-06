@@ -1,185 +1,202 @@
 using UnityEngine;
 using TMPro;
+using System;
 
 public class InputManager : MonoBehaviour
 {
-    public static InputManager instance { get; private set; }
+    [Header("UI References")]
+    public TextMeshProUGUI targetTextDisplay;
+    public TMP_InputField inputField;
+    [Tooltip("WPM、精度、進行状況を表示するテキスト")]
+    public TextMeshProUGUI statsTextDisplay;
 
-    [SerializeField]
-    private TMP_InputField inputField; // UIの入力フィールドへの参照
+    [Header("Game Settings")]
+    [TextArea(3, 5)]
+    public string targetString = "";
 
-    [Header("WPM Display")]
-    [SerializeField]
-    private TextMeshProUGUI wpmText;    // WPM表示用UIへの参照
+    private int currentIndex = 0; // 現在の進行位置（何文字目まで打ったか）
+    private float startTime;
+    private bool isTypingStarted = false;
+    private bool isTypingFinished = false;
 
-    private bool isShiftActive = false; // Shiftキーの状態
+    private float currentWPM = 0f;
+    private int totalKeystrokes = 0;     // 総打鍵数
+    private int incorrectKeystrokes = 0; // ミスタイプ数
 
-    // WPM計算用変数
-    private float startTime;         // 入力開始時刻
-    private bool isTyping = false;   // 入力中かどうかのフラグ
+    // 二重入力防止用の変数
+    private int lastInputFrame = -1;
 
-    [Header("WPM Calculation")]
-    [Tooltip("WPMを更新する間隔（秒）")]
-    public float wpmUpdateInterval = 1.0f;
-    private float nextWpmUpdateTime;
-
-    private void Awake()
+    void Start()
     {
-        if (instance == null)
-        {
-            instance = this;
-            DontDestroyOnLoad(gameObject); // シーンをまたいでも破棄されないようにする
-        }
-        else
-        {
-            Destroy(gameObject); // 既にインスタンスがあれば、重複を防ぐために自身を破棄
-        }
+        if (targetTextDisplay != null) targetTextDisplay.text = "";
+        if (statsTextDisplay == null) Debug.LogWarning("[DEBUG] InputManager: statsTextDisplay がアサインされていません！");
+        UpdateStatsUI();
     }
 
-    private void Start()
+    void Update()
     {
-        // 初期化時にInputFieldとWPMTextが設定されているか確認
-        if (inputField == null)
+        if (isTypingStarted && !isTypingFinished)
         {
-            Debug.LogError("TMP_InputField is not assigned to InputManager!");
+            CalculateLiveWPM();
         }
-        if (wpmText == null)
-        {
-            Debug.LogWarning("WPM TextMeshProUGUI is not assigned to InputManager. WPM will not be displayed.");
-        }
-
-        // 初期表示をクリアし、WPMを0に設定
-        if (inputField != null) inputField.text = ""; // InputFieldのテキストをクリア
-        UpdateWPMText(0);
-
-        // WPM更新の初期時刻を設定
-        nextWpmUpdateTime = Time.time + wpmUpdateInterval;
+        UpdateStatsUI();
     }
 
-    private void Update()
+    public void SetTargetText(string newText)
     {
-        // 入力中の場合のみWPMを更新
-        if (isTyping && Time.time >= nextWpmUpdateTime)
-        {
-            CalculateAndDisplayWPM();
-            nextWpmUpdateTime = Time.time + wpmUpdateInterval;
-        }
+        // Debug.Log($"[DEBUG] InputManager: テキストが設定されました: {newText}");
+        targetString = newText;
+        InitializeGame();
     }
 
-    // 文字入力
-    public void AppendCharacter(string character)
+    private void InitializeGame()
     {
-        if (inputField == null) return;
-
-        if (!isTyping)
+        if (string.IsNullOrEmpty(targetString))
         {
-            StartTyping(); // 最初の一文字が入力されたらタイピング開始
-        }
-
-        string finalCharacter = isShiftActive ? character.ToUpper() : character.ToLower();
-        inputField.text += finalCharacter; // 直接 inputField.text を操作
-    }
-
-    // バックスペース
-    public void Backspace()
-    {
-        if (inputField == null) return;
-
-        if (inputField.text.Length > 0)
-        {
-            inputField.text = inputField.text.Substring(0, inputField.text.Length - 1); // 直接 inputField.text を操作
-        }
-        
-        // inputField.text が空になったらタイピング終了とみなす
-        if (inputField.text.Length == 0 && isTyping)
-        {
-            StopTyping();
-        }
-    }
-
-    // スペース入力
-    public void Space()
-    {
-        if (inputField == null) return;
-
-        if (!isTyping)
-        {
-            StartTyping();
-        }
-        inputField.text += " "; // 直接 inputField.text を操作
-    }
-    
-    // Shift状態の切り替え
-    public void ToggleShift()
-    {
-        isShiftActive = !isShiftActive;
-        Debug.Log("Shift is now " + (isShiftActive ? "ON (Uppercase)" : "OFF (Lowercase)"));
-    }
-    
-    // Shift状態を明示的に設定するメソッド
-    public void SetShift(bool active)
-    {
-        isShiftActive = active;
-        if (active)
-        {
-            Debug.Log("Shift is now ON (Uppercase)");
-        }
-        else
-        {
-            Debug.Log("Shift is now OFF (Lowercase)");
-        }
-    }
-
-    // WPMの計算と表示
-    private void CalculateAndDisplayWPM()
-    {
-        // inputField.text.Length が0の場合、またはタイピング中でない場合はWPMを0に
-        if (!isTyping || inputField == null || inputField.text.Length == 0)
-        {
-            UpdateWPMText(0);
+            UpdateStatsUI();
             return;
         }
+        if (targetTextDisplay != null) targetTextDisplay.text = targetString;
+        if (inputField != null) inputField.text = "";
 
-        float elapsedTime = Time.time - startTime; // 経過時間（秒）
+        currentIndex = 0;
+        totalKeystrokes = 0;
+        incorrectKeystrokes = 0;
+        currentWPM = 0f;
+        isTypingStarted = false;
+        isTypingFinished = false;
+        lastInputFrame = -1;
+        UpdateTargetTextHighlight();
+        UpdateStatsUI();
+    }
 
-        // 経過時間が0の場合の除算エラーを避ける
-        if (elapsedTime <= 0)
+    public void ProcessInput(char inputChar)
+    {
+        if (Time.frameCount == lastInputFrame) return;
+        lastInputFrame = Time.frameCount;
+
+        if (isTypingFinished) return;
+        if (string.IsNullOrEmpty(targetString)) return;
+
+        if (!isTypingStarted)
         {
-            UpdateWPMText(0);
+            startTime = Time.time;
+            isTypingStarted = true;
+            // Debug.Log("[DEBUG] InputManager: タイピング開始");
+        }
+
+        totalKeystrokes++;
+
+        if (currentIndex < targetString.Length)
+        {
+            // 正誤判定を行う
+            bool isCorrect = (inputChar == targetString[currentIndex]);
+
+            if (isCorrect)
+            {
+                // 正解の場合の処理（ログ出しなど）
+                // Debug.Log("Correct!");
+            }
+            else
+            {
+                // 不正解の場合の処理
+                incorrectKeystrokes++;
+                Debug.Log($"Mistake! Expected: '{targetString[currentIndex]}', Input: '{inputChar}'");
+            }
+
+            // ▼▼▼ 変更点：正誤に関わらず、必ず次の文字へ進める ▼▼▼
+            currentIndex++;
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+            // 完了判定
+            if (currentIndex >= targetString.Length)
+            {
+                FinishTyping();
+            }
+        }
+
+        UpdateTargetTextHighlight();
+        if (!isTypingFinished) CalculateLiveWPM();
+        UpdateStatsUI();
+    }
+
+    private void FinishTyping()
+    {
+        isTypingFinished = true;
+        CalculateLiveWPM();
+        Debug.Log($"[DEBUG] InputManager: タイピング完了! Final WPM: {currentWPM:F0}, Accuracy: {GetAccuracyPercentage():F1}%");
+        UpdateStatsUI();
+        UpdateTargetTextHighlight();
+    }
+
+    private void CalculateLiveWPM()
+    {
+        float timeElapsed = Time.time - startTime;
+        if (timeElapsed <= 0.0001f || totalKeystrokes == 0)
+        {
+            currentWPM = 0f;
             return;
         }
-
-        // inputField.text.Length を直接使用してWPMを計算
-        // 5文字で1単語と仮定: (総文字数 / 5) / (経過時間 / 60)
-        float wpm = (inputField.text.Length / 5f) / (elapsedTime / 60f);
-        UpdateWPMText(Mathf.RoundToInt(wpm)); // 整数に丸めて表示
+        // Gross WPM計算
+        float words = totalKeystrokes / 5.0f;
+        float minutes = timeElapsed / 60.0f;
+        currentWPM = words / minutes;
     }
 
-    // WPMをUIに反映
-    private void UpdateWPMText(int wpmValue)
+    public float GetAccuracyPercentage()
     {
-        if (wpmText != null)
+        if (totalKeystrokes == 0) return 100f;
+        return (float)(totalKeystrokes - incorrectKeystrokes) / totalKeystrokes * 100f;
+    }
+
+    private void UpdateStatsUI()
+    {
+        if (statsTextDisplay != null)
         {
-            wpmText.text = $"WPM: {wpmValue}";
+            if (string.IsNullOrEmpty(targetString))
+            {
+                statsTextDisplay.text = "No Text...";
+                return;
+            }
+            int totalChars = targetString.Length;
+            int currentProgress = currentIndex;
+
+            string statusStr = $"Progress: {currentProgress} / {totalChars}\n" +
+                               $"WPM: {currentWPM:F0}\n" +
+                               $"Accuracy: {GetAccuracyPercentage():F1}% (Errors: {incorrectKeystrokes})";
+
+            statsTextDisplay.text = statusStr;
         }
     }
 
-    // タイピング開始時の処理
-    private void StartTyping()
+    private void UpdateTargetTextHighlight()
     {
-        isTyping = true;
-        startTime = Time.time; // タイピング開始時刻を記録
-        // inputField.text.Length が0から始まることを想定
-        nextWpmUpdateTime = Time.time + wpmUpdateInterval; // 次回更新時刻を設定
-        Debug.Log("Typing started.");
+        if (targetTextDisplay == null || string.IsNullOrEmpty(targetString)) return;
+
+        // 完了部分は緑
+        string completedPart = targetString.Substring(0, currentIndex);
+        // エラーで進んだ場合も「完了」扱いになるので、全て緑色で表示します。
+        // もしエラー箇所を赤くしたい場合は、ここで一文字ずつ判定して色を変える複雑な処理が必要です。
+        string completedStr = $"<color=green>{completedPart}</color>";
+
+        string nextCharStr = "";
+        if (currentIndex < targetString.Length)
+        {
+            char nextChar = targetString[currentIndex];
+            // 次の文字はオレンジで強調
+            nextCharStr = $"<color=#FFA500><u><b>{nextChar}</b></u></color>";
+        }
+
+        string remainingPart = "";
+        if (currentIndex + 1 < targetString.Length)
+        {
+            remainingPart = targetString.Substring(currentIndex + 1);
+        }
+        targetTextDisplay.text = completedStr + nextCharStr + remainingPart;
     }
 
-    // タイピング終了時の処理
-    private void StopTyping()
-    {
-        isTyping = false;
-        CalculateAndDisplayWPM(); // 終了時のWPMを最終表示
-        // inputField.text.Length はそのまま残る
-        Debug.Log("Typing stopped.");
-    }
+    // 互換性メソッド
+    public void Space() { ProcessInput(' '); }
+    public void AppendCharacter(string text) { if (!string.IsNullOrEmpty(text)) ProcessInput(text[0]); }
+    public void Backspace() { /* エラーでも進む仕様なのでバックスペースは無効化が妥当 */ }
 }
