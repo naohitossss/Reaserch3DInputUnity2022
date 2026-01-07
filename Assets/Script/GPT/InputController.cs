@@ -11,12 +11,17 @@ public class InputController : MonoBehaviour
 
     private readonly string[,] keys =
     {
-        { "1", "A", "B", "C", "D", "E" },
-        { "2", "F", "G", "H", "I", "J" },
-        { "3", "K", "L", "M", "N", "O" },
-        { "4", "P", "Q", "R", "S", "T" },
-        { "5", "U", "V", "W", "X", "Y" },
-        { "6", "7", "8", "9", "0", " " },
+        { "E", "A", "R", "M", "F", "V" },
+
+{ "T", "O", "L", "C", "Y", "K" },
+
+{ "N", "S", "D", "W", "P", "Q" },
+
+{ "I", "H", "U", "G", "B", "J" },
+
+{ "Z", "1", "2", "3", "4", "5" },
+
+{ "X", "6", "7", "8", "9", "0" }
     };
 
     public string[,] KeyLayout => keys;
