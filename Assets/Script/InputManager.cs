@@ -1,50 +1,83 @@
 using UnityEngine;
 using TMPro;
 using System;
+using System.Collections.Generic;
 
 public class InputManager : MonoBehaviour
 {
     [Header("UI References")]
+    [Tooltip("2行のみ表示されるターゲットテキスト表示用")]
     public TextMeshProUGUI targetTextDisplay;
     public TMP_InputField inputField;
-    [Tooltip("WPM、精度、進行状況を表示するテキスト")]
+    [Tooltip("総入力数、精度、進行状況を表示するテキスト")] // Tooltip修正
     public TextMeshProUGUI statsTextDisplay;
+    [Tooltip("残り時間を表示するテキスト")]
+    public TextMeshProUGUI timerTextDisplay;
 
     [Header("Game Settings")]
     [TextArea(3, 5)]
+    [Tooltip("改行を含む長いテキストを設定可能")]
     public string targetString = "";
 
-    private int currentIndex = 0; // 現在の進行位置（何文字目まで打ったか）
+    [Tooltip("制限時間（秒）。0の場合は無制限。")]
+    public float timeLimitSeconds = 60f;
+
+    // --- 内部変数 ---
     private float startTime;
     private bool isTypingStarted = false;
     private bool isTypingFinished = false;
 
-    private float currentWPM = 0f;
+    private float currentWPM = 0f; // WPM計算は内部的に残りますが表示はされません
     private int totalKeystrokes = 0;     // 総打鍵数
     private int incorrectKeystrokes = 0; // ミスタイプ数
 
-    // 二重入力防止用の変数
+    // 行管理用変数
+    private List<string> targetLines = new List<string>();
+    private int currentLineIndex = 0;
+    private int indexInCurrentLine = 0;
+
+    // 二重入力防止用
     private int lastInputFrame = -1;
 
     void Start()
     {
-        if (targetTextDisplay != null) targetTextDisplay.text = "";
+        if (targetTextDisplay != null)
+        {
+            targetTextDisplay.alignment = TextAlignmentOptions.TopLeft;
+            targetTextDisplay.overflowMode = TextOverflowModes.Masking;
+            targetTextDisplay.enableWordWrapping = false;
+        }
         if (statsTextDisplay == null) Debug.LogWarning("[DEBUG] InputManager: statsTextDisplay がアサインされていません！");
+        if (timerTextDisplay == null) Debug.LogWarning("[DEBUG] InputManager: timerTextDisplay がアサインされていません！");
+
         UpdateStatsUI();
+        UpdateTimerUI(timeLimitSeconds);
     }
 
     void Update()
     {
         if (isTypingStarted && !isTypingFinished)
         {
-            CalculateLiveWPM();
+            float timeElapsed = Time.time - startTime;
+
+            if (timeLimitSeconds > 0 && timeElapsed >= timeLimitSeconds)
+            {
+                Debug.Log("[DEBUG] InputManager: 時間切れ！");
+                FinishTyping(false);
+                UpdateTimerUI(0f);
+            }
+            else
+            {
+                CalculateLiveWPM(timeElapsed); // WPM計算は継続（将来のため）
+                UpdateTimerUI(timeLimitSeconds - timeElapsed);
+            }
         }
+
         UpdateStatsUI();
     }
 
     public void SetTargetText(string newText)
     {
-        // Debug.Log($"[DEBUG] InputManager: テキストが設定されました: {newText}");
         targetString = newText;
         InitializeGame();
     }
@@ -53,13 +86,21 @@ public class InputManager : MonoBehaviour
     {
         if (string.IsNullOrEmpty(targetString))
         {
+            targetLines.Clear();
             UpdateStatsUI();
+            UpdateTimerUI(timeLimitSeconds);
+            if (targetTextDisplay != null) targetTextDisplay.text = "";
             return;
         }
-        if (targetTextDisplay != null) targetTextDisplay.text = targetString;
+
+        string normalizedText = targetString.Replace("\r\n", "\n").Replace('\r', '\n');
+        targetLines = new List<string>(normalizedText.Split(new[] { '\n' }, StringSplitOptions.None));
+
+        currentLineIndex = 0;
+        indexInCurrentLine = 0;
+
         if (inputField != null) inputField.text = "";
 
-        currentIndex = 0;
         totalKeystrokes = 0;
         incorrectKeystrokes = 0;
         currentWPM = 0f;
@@ -68,6 +109,7 @@ public class InputManager : MonoBehaviour
         lastInputFrame = -1;
         UpdateTargetTextHighlight();
         UpdateStatsUI();
+        UpdateTimerUI(timeLimitSeconds);
     }
 
     public void ProcessInput(char inputChar)
@@ -76,68 +118,79 @@ public class InputManager : MonoBehaviour
         lastInputFrame = Time.frameCount;
 
         if (isTypingFinished) return;
-        if (string.IsNullOrEmpty(targetString)) return;
+        if (targetLines.Count == 0) return;
 
         if (!isTypingStarted)
         {
             startTime = Time.time;
             isTypingStarted = true;
-            // Debug.Log("[DEBUG] InputManager: タイピング開始");
+            Debug.Log("[DEBUG] InputManager: タイピング開始");
         }
 
-        totalKeystrokes++;
+        totalKeystrokes++; // ここで総入力数をカウントしています
 
-        if (currentIndex < targetString.Length)
+        string currentLineStr = targetLines[currentLineIndex];
+
+        if (indexInCurrentLine >= currentLineStr.Length)
         {
-            // 正誤判定を行う
-            bool isCorrect = (inputChar == targetString[currentIndex]);
+            MoveToNextLine();
+            UpdateTargetTextHighlight();
+            return;
+        }
 
-            if (isCorrect)
-            {
-                // 正解の場合の処理（ログ出しなど）
-                // Debug.Log("Correct!");
-            }
-            else
-            {
-                // 不正解の場合の処理
-                incorrectKeystrokes++;
-                Debug.Log($"Mistake! Expected: '{targetString[currentIndex]}', Input: '{inputChar}'");
-            }
+        char expectedChar = currentLineStr[indexInCurrentLine];
 
-            // ▼▼▼ 変更点：正誤に関わらず、必ず次の文字へ進める ▼▼▼
-            currentIndex++;
-            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
-            // 完了判定
-            if (currentIndex >= targetString.Length)
+        if (inputChar == expectedChar)
+        {
+            indexInCurrentLine++;
+            if (indexInCurrentLine >= currentLineStr.Length)
             {
-                FinishTyping();
+                MoveToNextLine();
             }
+        }
+        else
+        {
+            incorrectKeystrokes++;
         }
 
         UpdateTargetTextHighlight();
-        if (!isTypingFinished) CalculateLiveWPM();
+
+        if (!isTypingFinished) CalculateLiveWPM(Time.time - startTime);
         UpdateStatsUI();
     }
 
-    private void FinishTyping()
+    private void MoveToNextLine()
+    {
+        currentLineIndex++;
+        indexInCurrentLine = 0;
+
+        if (currentLineIndex >= targetLines.Count)
+        {
+            currentLineIndex = targetLines.Count - 1;
+            indexInCurrentLine = targetLines[currentLineIndex].Length;
+            FinishTyping(true);
+        }
+    }
+
+    private void FinishTyping(bool isCompleted)
     {
         isTypingFinished = true;
-        CalculateLiveWPM();
-        Debug.Log($"[DEBUG] InputManager: タイピング完了! Final WPM: {currentWPM:F0}, Accuracy: {GetAccuracyPercentage():F1}%");
+        CalculateLiveWPM(Time.time - startTime);
+
+        string resultMsg = isCompleted ? "完走!" : "時間切れ!";
+        Debug.Log($"[DEBUG] InputManager: {resultMsg} Total Keys: {totalKeystrokes}");
+
         UpdateStatsUI();
         UpdateTargetTextHighlight();
     }
 
-    private void CalculateLiveWPM()
+    private void CalculateLiveWPM(float timeElapsed)
     {
-        float timeElapsed = Time.time - startTime;
         if (timeElapsed <= 0.0001f || totalKeystrokes == 0)
         {
             currentWPM = 0f;
             return;
         }
-        // Gross WPM計算
         float words = totalKeystrokes / 5.0f;
         float minutes = timeElapsed / 60.0f;
         currentWPM = words / minutes;
@@ -149,6 +202,7 @@ public class InputManager : MonoBehaviour
         return (float)(totalKeystrokes - incorrectKeystrokes) / totalKeystrokes * 100f;
     }
 
+    // ▼▼▼ 変更箇所：表示内容をWPMから総入力数に変更 ▼▼▼
     private void UpdateStatsUI()
     {
         if (statsTextDisplay != null)
@@ -158,45 +212,62 @@ public class InputManager : MonoBehaviour
                 statsTextDisplay.text = "No Text...";
                 return;
             }
-            int totalChars = targetString.Length;
-            int currentProgress = currentIndex;
 
-            string statusStr = $"Progress: {currentProgress} / {totalChars}\n" +
-                               $"WPM: {currentWPM:F0}\n" +
-                               $"Accuracy: {GetAccuracyPercentage():F1}% (Errors: {incorrectKeystrokes})";
+            string statusHeader = isTypingFinished ? (currentLineIndex == targetLines.Count - 1 && indexInCurrentLine == targetLines[currentLineIndex].Length ? "[FINISHED]" : "[TIME UP]") : "";
 
+            // ここを変更しました
+            string statusStr = $"{statusHeader}\n" +
+                               $"Progress: Line {currentLineIndex + 1} / {targetLines.Count}\n" +
+                               $"Total Keys: {totalKeystrokes}\n" + // WPM -> Total Keys
+                               $"Accuracy: {GetAccuracyPercentage():F1}%";
             statsTextDisplay.text = statusStr;
+        }
+    }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+    private void UpdateTimerUI(float remainingTime)
+    {
+        if (timerTextDisplay != null)
+        {
+            if (timeLimitSeconds <= 0)
+            {
+                timerTextDisplay.text = "Time: No Limit";
+            }
+            else
+            {
+                remainingTime = Mathf.Max(0f, remainingTime);
+                timerTextDisplay.text = $"Time: {remainingTime:F1}s";
+            }
         }
     }
 
     private void UpdateTargetTextHighlight()
     {
-        if (targetTextDisplay == null || string.IsNullOrEmpty(targetString)) return;
+        if (targetTextDisplay == null || targetLines.Count == 0) return;
 
-        // 完了部分は緑
-        string completedPart = targetString.Substring(0, currentIndex);
-        // エラーで進んだ場合も「完了」扱いになるので、全て緑色で表示します。
-        // もしエラー箇所を赤くしたい場合は、ここで一文字ずつ判定して色を変える複雑な処理が必要です。
-        string completedStr = $"<color=green>{completedPart}</color>";
+        string currentLineStr = targetLines[currentLineIndex];
 
-        string nextCharStr = "";
-        if (currentIndex < targetString.Length)
+        string completedPart = currentLineStr.Substring(0, indexInCurrentLine);
+        string line1Display = $"<color=green>{completedPart}</color>";
+
+        if (indexInCurrentLine < currentLineStr.Length)
         {
-            char nextChar = targetString[currentIndex];
-            // 次の文字はオレンジで強調
-            nextCharStr = $"<color=#FFA500><u><b>{nextChar}</b></u></color>";
+            char nextChar = currentLineStr[indexInCurrentLine];
+            string nextCharStr = isTypingFinished ? $"{nextChar}" : $"<color=#FFA500><u><b>{nextChar}</b></u></color>";
+            string remainingPart = currentLineStr.Substring(indexInCurrentLine + 1);
+            line1Display += nextCharStr + remainingPart;
         }
 
-        string remainingPart = "";
-        if (currentIndex + 1 < targetString.Length)
+        string line2Display = "";
+        if (currentLineIndex + 1 < targetLines.Count)
         {
-            remainingPart = targetString.Substring(currentIndex + 1);
+            line2Display = "\n" + targetLines[currentLineIndex + 1];
         }
-        targetTextDisplay.text = completedStr + nextCharStr + remainingPart;
+
+        targetTextDisplay.text = line1Display + line2Display;
     }
 
-    // 互換性メソッド
     public void Space() { ProcessInput(' '); }
     public void AppendCharacter(string text) { if (!string.IsNullOrEmpty(text)) ProcessInput(text[0]); }
-    public void Backspace() { /* エラーでも進む仕様なのでバックスペースは無効化が妥当 */ }
+    public void Backspace() { }
 }

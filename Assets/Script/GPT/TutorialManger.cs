@@ -8,16 +8,13 @@ public class TutorialManager : MonoBehaviour
     [Header("External References")]
     [Tooltip("キーマップ定義と入力イベントを持つ InputController への参照")]
     [SerializeField] private InputController inputController;
-
-    // ▼▼▼ 追加：InputManager への参照 ▼▼▼
     [Tooltip("タイピングゲームロジックを持つ InputManager への参照")]
     [SerializeField] private InputManager inputManager;
-    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
     [Header("Target Settings")]
-    [Tooltip("表示対象の文章（これがInputManagerにも渡され、タイピングの目標になります）")]
+    [Tooltip("表示対象の文章（これがInputManagerにも渡されます）")]
     [TextArea(3, 10)]
-    public string targetSentence = "Hello World";
+    public string targetSentence = "Hello World\nThis is next line.";
 
     [Header("UI References (Text)")]
     [Tooltip("現在入力すべき文字のガイドを表示するテキスト")]
@@ -32,13 +29,12 @@ public class TutorialManager : MonoBehaviour
     [Header("Resources (Sprites)")]
     [Tooltip("方向指示用スプライト。順序: 右, 左, 上, 下, 前, 後")]
     public Sprite[] directionSprites;
-    [Tooltip("スペース入力指示用スプライト")]
+    [Tooltip("スペース/エンター入力指示用スプライト")]
     public Sprite spaceGestureSprite;
 
     private List<char> charList = new List<char>();
     private int currentIndex = 0;
 
-    // 逆引き用構造体
     private struct GestureCombo
     {
         public int middleDir;
@@ -49,44 +45,22 @@ public class TutorialManager : MonoBehaviour
 
     void Start()
     {
-        // 参照チェックと自動取得
         if (inputController == null) inputController = FindObjectOfType<InputController>();
-        // ▼▼▼ 追加：InputManagerの自動取得 ▼▼▼
         if (inputManager == null) inputManager = FindObjectOfType<InputManager>();
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-        // 必須コンポーネントのチェック
-        if (inputController == null)
+        if (inputController == null || directionSprites == null || directionSprites.Length != 6 || spaceGestureSprite == null)
         {
-            Debug.LogError("【TutorialManager】InputControllerが見つかりません。Inspectorで設定してください。");
-            // InputControllerがないと動作できないためリターン
-            return;
-        }
-        if (inputManager == null)
-        {
-            Debug.LogWarning("【TutorialManager】InputManagerが見つかりません。タイピング判定は行われません。");
-            // InputManagerがなくてもガイド表示だけは続けるため続行
-        }
-
-        // 画像リソースチェック
-        if (directionSprites == null || directionSprites.Length != 6 || spaceGestureSprite == null)
-        {
-            Debug.LogError("【TutorialManager】画像リソースが不足しています。Inspectorで設定してください。");
+            Debug.LogError("【TutorialManager】必要な参照が不足しています。Inspectorを確認してください。");
             return;
         }
 
-        // ▼▼▼ 重要：自身のテキストを InputManager に設定する ▼▼▼
-        // これにより、TutorialManagerで設定した文章がタイピングの正解データとなります。
-        if (inputManager != null)
+        if (inputManager != null && !string.IsNullOrEmpty(targetSentence))
         {
             inputManager.SetTargetText(targetSentence);
         }
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-        // 初期化処理（TutorialManager自身の準備）
         SplitSentence();
 
-        // InputControllerからキーレイアウトを取得して逆引きマップを構築
         if (inputController.KeyLayout != null)
         {
             BuildReverseMap(inputController.KeyLayout);
@@ -97,55 +71,87 @@ public class TutorialManager : MonoBehaviour
             return;
         }
 
-        // 最初の文字のガイドを表示
+        SkipInvalidChars();
         UpdateGuideDisplay();
-
-        // InputControllerからの文字入力イベントを購読する
         inputController.OnCharacterInputted += OnAnyCharacterInputted;
     }
 
     void OnDestroy()
     {
-        // イベント購読の解除
         if (inputController != null)
         {
             inputController.OnCharacterInputted -= OnAnyCharacterInputted;
         }
     }
 
-    /// <summary>
-    /// InputControllerから何らかの文字入力があったら呼ばれるハンドラ
-    /// </summary>
-    /// <param name="inputtedString">入力された文字（今回は判定に使わないので無視します）</param>
     private void OnAnyCharacterInputted(string inputtedString)
     {
-        // まだ表示する文字が残っていれば、無条件で次の文字へ進む
-        if (currentIndex < charList.Count)
+        if (string.IsNullOrEmpty(inputtedString)) return;
+        char inputChar = inputtedString[0];
+
+        // InputManagerへの重複転送は行わない
+
+        if (currentIndex >= charList.Count) return;
+
+        char targetChar = charList[currentIndex];
+
+        bool isCorrect = false;
+        // 改行文字はスペース入力で正解とする
+        if (targetChar == '\n' || targetChar == '\r')
         {
-            // Debug.Log($"入力検知 → 次の文字へ進みます。(Index: {currentIndex} -> {currentIndex + 1})");
+            isCorrect = (inputChar == ' ');
+        }
+        else
+        {
+            // ▼▼▼ 修正箇所：大文字小文字を厳密に区別して比較 ▼▼▼
+            isCorrect = (inputChar == targetChar);
+            // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+        }
+
+        if (isCorrect)
+        {
             NextChar();
         }
     }
 
-    // 次の文字へインデックスを進めて表示を更新する
     private void NextChar()
     {
         currentIndex++;
+        SkipInvalidChars();
         UpdateGuideDisplay();
     }
 
-    // 対象文章を文字リストに分割
+    private void SkipInvalidChars()
+    {
+        while (currentIndex < charList.Count)
+        {
+            char currentChar = charList[currentIndex];
+
+            if (currentChar == '\n' || currentChar == '\r')
+            {
+                break;
+            }
+
+            if (charToGestureMap.ContainsKey(char.ToLower(currentChar)))
+            {
+                break;
+            }
+
+            currentIndex++;
+        }
+    }
+
     private void SplitSentence()
     {
         charList.Clear();
         if (!string.IsNullOrEmpty(targetSentence))
         {
-            charList.AddRange(targetSentence.ToCharArray());
+            string normalized = targetSentence.Replace("\r\n", "\n").Replace('\r', '\n');
+            charList.AddRange(normalized.ToCharArray());
         }
         currentIndex = 0;
     }
 
-    // キーレイアウトから逆引きマップ（文字→ジェスチャー）を構築
     private void BuildReverseMap(string[,] layout)
     {
         charToGestureMap.Clear();
@@ -160,20 +166,20 @@ public class TutorialManager : MonoBehaviour
                 if (string.IsNullOrEmpty(keyCharStr)) continue;
                 char baseChar = keyCharStr[0];
 
-                // 大文字小文字両方を同じジェスチャーにマッピング
                 var combo = new GestureCombo { middleDir = mDir, secondDir = sDir };
+                // ガイド表示用には大小両方を登録しておく（変更なし）
                 charToGestureMap[char.ToLower(baseChar)] = combo;
                 charToGestureMap[char.ToUpper(baseChar)] = combo;
             }
         }
-        // スペースキーのマッピング
-        charToGestureMap[' '] = new GestureCombo { isSpace = true };
+        var spaceCombo = new GestureCombo { isSpace = true };
+        charToGestureMap[' '] = spaceCombo;
+        charToGestureMap['\n'] = spaceCombo;
+        charToGestureMap['\r'] = spaceCombo;
     }
 
-    // 現在のターゲット文字に合わせてガイド表示を更新
     public void UpdateGuideDisplay()
     {
-        // 最後の文字まで表示し終わった場合
         if (currentIndex >= charList.Count)
         {
             if (targetCharText != null) targetCharText.text = "Good Job!";
@@ -182,7 +188,6 @@ public class TutorialManager : MonoBehaviour
             return;
         }
 
-        // 文章が空の場合
         if (charList.Count == 0)
         {
             if (targetCharText != null) targetCharText.text = "";
@@ -192,31 +197,35 @@ public class TutorialManager : MonoBehaviour
         }
 
         char targetChar = charList[currentIndex];
+
         if (targetCharText != null)
         {
-            targetCharText.text = targetChar == ' ' ? "[Space]" : $"'{targetChar}'";
+            string charDisplay = $"'{targetChar}'";
+            if (targetChar == ' ') charDisplay = "[Space]";
+            else if (targetChar == '\n' || targetChar == '\r') charDisplay = "[Enter]";
+
+            targetCharText.text = charDisplay;
         }
 
-        // マップにない文字（改行など）の場合はガイドを非表示
-        if (!charToGestureMap.ContainsKey(targetChar))
+        char searchChar = char.ToLower(targetChar);
+
+        if (!charToGestureMap.ContainsKey(searchChar))
         {
             SetImageActive(firstGestureImage, false);
             SetImageActive(secondGestureImage, false);
             return;
         }
 
-        GestureCombo combo = charToGestureMap[targetChar];
+        GestureCombo combo = charToGestureMap[searchChar];
 
         if (combo.isSpace)
         {
-            // スペース用表示
             SetImageSprite(firstGestureImage, spaceGestureSprite);
             SetImageActive(firstGestureImage, true);
             SetImageActive(secondGestureImage, false);
         }
         else
         {
-            // 通常文字用表示（2段階ジェスチャー）
             if (IsValidIndex(combo.middleDir) && IsValidIndex(combo.secondDir))
             {
                 SetImageSprite(firstGestureImage, directionSprites[combo.middleDir]);
@@ -227,13 +236,11 @@ public class TutorialManager : MonoBehaviour
         }
     }
 
-    // ユーティリティ: 画像のスプライト設定（nullチェック付き）
     private void SetImageSprite(Image targetImage, Sprite newSprite)
     {
         if (targetImage != null && newSprite != null) targetImage.sprite = newSprite;
     }
 
-    // ユーティリティ: 画像の表示/非表示設定（nullチェック付き）
     private void SetImageActive(Image targetImage, bool isActive)
     {
         if (targetImage != null && targetImage.gameObject.activeSelf != isActive)
@@ -242,7 +249,6 @@ public class TutorialManager : MonoBehaviour
         }
     }
 
-    // ユーティリティ: 配列インデックスの有効性チェック
     private bool IsValidIndex(int index)
     {
         return index >= 0 && index < directionSprites.Length;
