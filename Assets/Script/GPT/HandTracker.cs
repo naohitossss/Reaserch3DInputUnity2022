@@ -10,7 +10,7 @@ public class HandTracker : MonoBehaviour
     private Transform middleTip;
     private bool isInitialized;
 
-    private float updateInterval = 0.01f; // 0.1秒ごとに更新
+    private float updateInterval = 0.005f; // 0.1秒ごとに更新
     private float nextUpdateTime = 0f;
 
     public Vector3 IndexTipPos => indexTip ? indexTip.position : Vector3.zero;

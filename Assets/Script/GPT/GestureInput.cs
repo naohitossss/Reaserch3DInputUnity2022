@@ -83,7 +83,7 @@ public class GestureInput : MonoBehaviour
     private Vector3 lastMiddlePos;
     private float updateThreshold = 0.001f; // 位置更新の閾値
     [SerializeField]
-    private float gestureUpdateInterval = 0.016f; // 100msごとに更新 (未使用)
+    private float gestureUpdateInterval = 0.01f; // 100msごとに更新 (未使用)
     private float nextGestureUpdateTime = 0f;
 
     [SerializeField]
