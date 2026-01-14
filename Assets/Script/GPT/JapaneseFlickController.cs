@@ -31,7 +31,7 @@ public class JapaneseFlickController : MonoBehaviour
         { "か", "き", "く", "け", "こ", "っ" }, // 中指→ (か行)
         { "た", "ち", "つ", "て", "と", "！" }, // 中指← (た行)
         { "は", "ひ", "ふ", "へ", "ほ", "ん" }, // 中指↑ (は行 + ん)
-        { "や", "「", "ゆ", "」", "よ", "…"},  // 中指↓ (や行変則)
+        { "や", "「", "ゆ", "」", "よ", "…"},   // 中指↓ (や行変則)
         { "わ", "を", "（", "）", "～", "" },   // 中指● (わ行変則)
         // 特殊キー定義: [濁]濁点, [半]半濁点, [小]小文字化
         { "[濁]", "[半]", "[小]", "゛", "゜", "ゃ" } // 中指◎ (機能)
@@ -60,6 +60,7 @@ public class JapaneseFlickController : MonoBehaviour
 
         if (gestureManager != null)
         {
+            // ここでエラーが出ていた箇所。メソッドの型を修正したので解消されるはず。
             gestureManager.OnCategorySelected += OnCategorySelected;
             gestureManager.OnKeySelected += OnKeySelected;
             gestureManager.OnBackspace += OnBackspace;
@@ -75,23 +76,56 @@ public class JapaneseFlickController : MonoBehaviour
         }
     }
 
+    void OnDestroy()
+    {
+        if (gestureManager != null)
+        {
+            gestureManager.OnCategorySelected -= OnCategorySelected;
+            gestureManager.OnKeySelected -= OnKeySelected;
+            gestureManager.OnBackspace -= OnBackspace;
+            gestureManager.OnLowercase -= OnIndexFingerStart;
+            gestureManager.OnUppercase -= OnRingFingerStart;
+            if (gestureManager.GetType().GetEvent("OnSpaceKey") != null)
+            {
+                gestureManager.GetType().GetEvent("OnSpaceKey").RemoveEventHandler(gestureManager, new Action(OnSpaceInput));
+            }
+        }
+    }
+
     void OnIndexFingerStart() { useRingMap = false; Debug.Log("Map: Index Finger (あさなまら)"); }
     void OnRingFingerStart() { useRingMap = true; Debug.Log("Map: Ring Finger (かたはやわ)"); }
 
-    void OnCategorySelected(Vector3 start, Vector3 end)
+    // ▼▼▼ 修正箇所：引数を int に変更 ▼▼▼
+    // 以前: void OnCategorySelected(Vector3 start, Vector3 end)
+    void OnCategorySelected(int directionIndex)
     {
-        currentCategory = DirectionalSelector.GetDirectionIndex(start, end);
-        // Debug.Log($"カテゴリ選択: {categories[currentCategory]}");
+        currentCategory = directionIndex;
+        // Debug.Log($"カテゴリ選択: {categories[currentCategory]} (Index: {currentCategory})");
     }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-    void OnKeySelected(Vector3 start, Vector3 end)
+    // ▼▼▼ 修正箇所：引数を int に変更 ▼▼▼
+    // 以前: void OnKeySelected(Vector3 start, Vector3 end)
+    void OnKeySelected(int keyIndex)
     {
         if (currentCategory < 0) return;
 
-        int keyIndex = DirectionalSelector.GetDirectionIndex(start, end);
-        
         // 使う指に応じて配列を切り替える
         string[,] currentMap = useRingMap ? ringKeys : indexKeys;
+
+        // ▼ 配列の範囲外アクセスを防ぐガード処理を追加 ▼
+        int rows = currentMap.GetLength(0); // 通常は 6
+        int cols = currentMap.GetLength(1); // 通常は 6
+
+        if (currentCategory >= rows || keyIndex < 0 || keyIndex >= cols)
+        {
+             Debug.LogWarning($"[JapaneseFlickController] 無効なインデックスを検知しました。Category: {currentCategory}, KeyIndex: {keyIndex}");
+             currentCategory = -1;
+             return;
+        }
+        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
+        // ここで安全にアクセスできる
         string inputChar = currentMap[currentCategory, keyIndex];
 
         if (string.IsNullOrEmpty(inputChar)) {
@@ -112,6 +146,7 @@ public class JapaneseFlickController : MonoBehaviour
 
         currentCategory = -1;
     }
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
     // 文字出力処理
     private void OutputString(string text)

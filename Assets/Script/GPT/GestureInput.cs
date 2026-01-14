@@ -22,7 +22,8 @@ public class GestureInput : MonoBehaviour
     public Transform worldCenter;
 
     [Header("Parameters")]
-    public float moveThreshold = 0.04f;
+    [Tooltip("フリックとみなす最小の移動距離（メートル単位）。これより短いとキャンセルされます。")]
+    public float minSwipeDistance = 0.04f;
     public bool debugLog = true;
 
     // ✅ 追加: 各指の曲がり具合の閾値設定
@@ -30,6 +31,13 @@ public class GestureInput : MonoBehaviour
     [Tooltip("人差し指（小文字）の曲がり判定閾値")]
     [Range(0.0f, 1.0f)]
     public float indexBendThreshold = 0.6f;
+    
+    // ▼▼▼ 追加：中指の曲がり閾値 ▼▼▼
+    [Tooltip("中指の曲がり判定閾値（現在は未使用だが検知可能）")]
+    [Range(0.0f, 1.0f)]
+    public float middleBendThreshold = 0.6f;
+    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
+
     [Tooltip("薬指（大文字）の曲がり判定閾値")]
     [Range(0.0f, 1.0f)]
     public float ringBendThreshold = 0.6f;
@@ -52,6 +60,7 @@ public class GestureInput : MonoBehaviour
     
     // ✅ 追加: 前フレームの曲がり状態を保持する変数
     private bool prevIndexBent;
+    private bool prevMiddleBent; // ▼追加：中指用
     private bool prevRingBent;
     private bool prevPinkyBent;
 
@@ -59,41 +68,39 @@ public class GestureInput : MonoBehaviour
     private Vector3 categoryEndPosAtMiddlePinchUp;
     private Vector3 keyStartPos;
 
-    public event Action<Vector3, Vector3> OnCategorySelected;
-    public event Action<Vector3, Vector3> OnKeySelected;
+    public event Action<int> OnCategorySelected;
+    public event Action<int> OnKeySelected;
     public event Action OnBackspace;
     public event Action OnUppercase;
     public event Action OnLowercase;
     public event Action OnSpace;
-    public event Action OnSpaceKey; // スペースキー入力イベント
+    public event Action OnSpaceKey; 
 
     // バックスペース用ジェスチャーの状態
     private Vector3 previousHandPosition;
-    private float waveDetectionTime = 1f; // 検出に必要な時間
+    private float waveDetectionTime = 1f; 
     private float waveStartTime;
-    private int waveDirectionChanges = 0; // 左右の移動回数
-    private float lastWaveDirection = 0; // 前回の移動方向
+    private int waveDirectionChanges = 0; 
+    private float lastWaveDirection = 0; 
 
     [Header("Wave Settings")]
     [Tooltip("手を振る動作で必要な方向変化回数")]
     public int waveRequiredChanges = 4;
 
-    // キャッシュ用の変数を追加 (未使用だが残しておく)
+    // キャッシュ用の変数
     private Vector3 lastIndexPos;
     private Vector3 lastMiddlePos;
-    private float updateThreshold = 0.001f; // 位置更新の閾値
+    private float updateThreshold = 0.001f; 
     [SerializeField]
-    private float gestureUpdateInterval = 0.01f; // 100msごとに更新 (未使用)
+    private float gestureUpdateInterval = 0.016f; 
     private float nextGestureUpdateTime = 0f;
 
     [SerializeField]
-    private InputManager inputManager; // InputManagerへの参照を追加
+    private InputManager inputManager; 
 
     void Start()
     {
         InitializeBones();
-
-        // InputManagerの取得
         if (inputManager == null)
         {
             inputManager = FindObjectOfType<InputManager>();
@@ -114,7 +121,6 @@ public class GestureInput : MonoBehaviour
                 indexTip = bone.Transform;
             if (bone.Id == OVRSkeleton.BoneId.Hand_MiddleTip)
                 middleTip = bone.Transform;
-
             if (bone.Id == OVRSkeleton.BoneId.Hand_ThumbTip)
                 thumbTip = bone.Transform;
             if (bone.Id == OVRSkeleton.BoneId.Hand_PinkyTip)
@@ -146,27 +152,33 @@ public class GestureInput : MonoBehaviour
         // --- ✅ 修正: 指の曲がり具合による判定 ---
         // 各指のピンチ強度（曲がり具合 0.0〜1.0）を取得
         float indexStrength = hand.GetFingerPinchStrength(OVRHand.HandFinger.Index);
+        // ▼追加：中指の強度取得
+        float middleStrength = hand.GetFingerPinchStrength(OVRHand.HandFinger.Middle);
         float ringStrength = hand.GetFingerPinchStrength(OVRHand.HandFinger.Ring);
         float pinkyStrength = hand.GetFingerPinchStrength(OVRHand.HandFinger.Pinky);
 
         // 閾値判定
         bool indexBentNow = indexStrength > indexBendThreshold;
+        // ▼追加：中指の閾値判定
+        bool middleBentNow = middleStrength > middleBendThreshold;
         bool ringBentNow = ringStrength > ringBendThreshold;
         bool pinkyBentNow = pinkyStrength > pinkyBendThreshold;
 
         // 曲げ開始（Down）と解除（Up）の検出
         bool indexBentDown = indexBentNow && !prevIndexBent;
         bool indexBentUp = !indexBentNow && prevIndexBent;
+        // ▼追加：中指のDown/Up判定（将来的に使う場合用）
+        bool middleBentDown = middleBentNow && !prevMiddleBent;
+        bool middleBentUp = !middleBentNow && prevMiddleBent;
+
         bool ringBentDown = ringBentNow && !prevRingBent;
         bool ringBentUp = !ringBentNow && prevRingBent;
         bool pinkyBentDown = pinkyBentNow && !prevPinkyBent;
 
         // --- 小指の曲げでスペースキー入力 ---
-        // ✅ 修正: 曲がり具合が 0.8 を超えた瞬間に反応
         if (pinkyBentDown)
         {
             HandleSpaceKey();
-            // if (debugLog) Debug.Log($"Pinky bend strength: {pinkyStrength:F2}"); // デバッグ用
         }
 
         // === 各フェーズ ===
@@ -187,10 +199,12 @@ public class GestureInput : MonoBehaviour
                     categoryEndPosAtMiddlePinchUp = middleTip.position;
                     float distance = Vector3.Distance(categoryStartPos, categoryEndPosAtMiddlePinchUp);
 
-                    if (distance > moveThreshold)
+                    if (distance > minSwipeDistance)
                     {
                         CurrentPhase = InputPhase.CategorySelected;
-                        if (debugLog) Debug.Log("✅ Category direction recorded. Awaiting key gesture.");
+                        int directionIndex = DirectionalSelector.GetDirectionIndex(categoryStartPos, categoryEndPosAtMiddlePinchUp);
+                        OnCategorySelected?.Invoke(directionIndex);
+                        if (debugLog) Debug.Log($"✅ Category direction {directionIndex} selected. Awaiting key gesture.");
                     }
                     else
                     {
@@ -201,7 +215,7 @@ public class GestureInput : MonoBehaviour
                 break;
 
             case InputPhase.CategorySelected:
-                // ✅ 修正: 人差し指または薬指の「曲げ開始」を待つ
+                // 人差し指または薬指の「曲げ開始」を待つ
                 if (indexBentDown || ringBentDown)
                 {
                     if (indexBentDown)
@@ -221,7 +235,7 @@ public class GestureInput : MonoBehaviour
                 break;
 
             case InputPhase.KeySelecting:
-                // ✅ 修正: 人差し指または薬指の「曲げ解除」を待つ
+                // 人差し指または薬指の「曲げ解除」を待つ
                 if (indexBentUp || ringBentUp)
                 {
                     Vector3 keyEndPos;
@@ -235,11 +249,13 @@ public class GestureInput : MonoBehaviour
                         keyEndPos = ringTip.position;
                     }
                     
-                    if (Vector3.Distance(keyStartPos, keyEndPos) > moveThreshold)
+                    float distance = Vector3.Distance(keyStartPos, keyEndPos);
+
+                    if (distance > minSwipeDistance)
                     {
-                        OnCategorySelected?.Invoke(categoryStartPos, categoryEndPosAtMiddlePinchUp);
-                        OnKeySelected?.Invoke(keyStartPos, keyEndPos);
-                        if (debugLog) Debug.Log("🔡 Key Selected (Bend Up)");
+                        int keyDirectionIndex = DirectionalSelector.GetDirectionIndex(keyStartPos, keyEndPos);
+                        OnKeySelected?.Invoke(keyDirectionIndex);
+                        if (debugLog) Debug.Log($"🔡 Key direction {keyDirectionIndex} Selected (Bend Up)");
                     }
                     else
                     {
@@ -254,10 +270,11 @@ public class GestureInput : MonoBehaviour
         prevMiddlePinch = middleNow;
         // ✅ 追加: 曲がり状態を更新
         prevIndexBent = indexBentNow;
+        prevMiddleBent = middleBentNow; // ▼追加：中指
         prevRingBent = ringBentNow;
         prevPinkyBent = pinkyBentNow;
 
-        // バックスペース判定（変更なし）
+        // バックスペース判定
         if (IsWaveGesture())
         {
             OnBackspace?.Invoke();
@@ -273,7 +290,6 @@ public class GestureInput : MonoBehaviour
         keyStartPos = Vector3.zero;
     }
 
-    // ... (IsWaveGesture などのメソッドは変更なし) ...
     private bool IsWaveGesture()
     {
         if (CurrentPhase != InputPhase.Idle) return false;
@@ -291,7 +307,7 @@ public class GestureInput : MonoBehaviour
 
         float currentDirection = currentHandPosition.x - previousHandPosition.x;
 
-        if (Mathf.Sign(currentDirection) != Mathf.Sign(lastWaveDirection) && Mathf.Abs(currentDirection) > moveThreshold)
+        if (Mathf.Sign(currentDirection) != Mathf.Sign(lastWaveDirection) && Mathf.Abs(currentDirection) > minSwipeDistance + 1f)
         {
             waveDirectionChanges++;
             lastWaveDirection = currentDirection;
@@ -322,7 +338,6 @@ public class GestureInput : MonoBehaviour
             inputManager.Space();
             OnSpace?.Invoke();
             OnSpaceKey?.Invoke();
-            // ✅ ログメッセージも修正
             if (debugLog) Debug.Log("Space key triggered by **pinky bend** gesture");
         }
         else
