@@ -6,212 +6,92 @@ public class JapaneseFlickController : MonoBehaviour
 {
     [Header("References")]
     public GestureInput gestureManager;
-    public InputManager inputManagerTarget;
+    public InputManager inputManagerTarget; // UI表示/バックスペース用
 
-    // ■■■ 案2配列定義 (行統合型) ■■■
-
-    // カテゴリ名（表示用）
-    private readonly string[] categories = { "あ/か行", "さ/た行", "な/は行", "ま/や行", "ら/わ行", "機能・記号" };
-
-    // 人差し指用マップ (ペアの左側: あさなまら行)
-    // 方向順序: →(あ段), ←(い段), ↑(う段), ↓(え段), ●(お段), ◎(予備)
-    private readonly string[,] indexKeys =
-    {
-        { "あ", "い", "う", "え", "お", "ー" }, // 中指→ (あ行)
-        { "さ", "し", "す", "せ", "そ", "・" }, // 中指← (さ行)
-        { "な", "に", "ぬ", "ね", "の", "、" }, // 中指↑ (な行)
-        { "ま", "み", "む", "め", "も", "。" }, // 中指↓ (ま行)
-        { "ら", "り", "る", "れ", "ろ", "？" }, // 中指● (ら行)
-        { "", "", "", "", "", "" }             // 中指◎ (機能・予備)
+    private readonly string[,] indexKeys = {
+        { "あ", "い", "う", "え", "お", "ー" }, { "さ", "し", "す", "せ", "そ", "・" },
+        { "な", "に", "ぬ", "ね", "の", "、" }, { "ま", "み", "む", "め", "も", "。" },
+        { "ら", "り", "る", "れ", "ろ", "？" }, { "", "", "", "", "", "" }
     };
 
-    // 薬指用マップ (ペアの右側: かたはやわ行 + 機能)
-    private readonly string[,] ringKeys =
-    {
-        { "か", "き", "く", "け", "こ", "っ" }, // 中指→ (か行)
-        { "た", "ち", "つ", "て", "と", "！" }, // 中指← (た行)
-        { "は", "ひ", "ふ", "へ", "ほ", "ん" }, // 中指↑ (は行 + ん)
-        { "や", "「", "ゆ", "」", "よ", "…"},   // 中指↓ (や行変則)
-        { "わ", "を", "（", "）", "～", "" },   // 中指● (わ行変則)
-        // 特殊キー定義: [濁]濁点, [半]半濁点, [小]小文字化
-        { "[濁]", "[半]", "[小]", "゛", "゜", "ゃ" } // 中指◎ (機能)
+    private readonly string[,] ringKeys = {
+        { "か", "き", "く", "け", "こ", "っ" }, { "た", "ち", "つ", "て", "と", "！" },
+        { "は", "ひ", "ふ", "へ", "ほ", "ん" }, { "や", "「", "ゆ", "」", "よ", "…"},
+        { "わ", "を", "（", "）", "～", "" }, { "[濁]", "[半]", "[小]", "゛", "゜", "ゃ" }
     };
 
-    // 現在どちらのマップを使うか
     private bool useRingMap = false;
-    // 最後に入力した文字（濁点処理用）
     private string lastInputChar = "";
-
-    // 外部連携用（現在のマップを返す）
-    public string[,] KeyLayout => useRingMap ? ringKeys : indexKeys;
-    public event Action<string> OnCharacterInputted;
-
     private int currentCategory = -1;
     private Dictionary<string, string> dakutenMap;
     private Dictionary<string, string> handakutenMap;
     private Dictionary<string, string> smallCharMap;
 
+    public event Action<string> OnCharacterInputted;
 
     void Start()
     {
         InitializeModifierMaps();
-
         if (inputManagerTarget == null) inputManagerTarget = FindObjectOfType<InputManager>();
 
         if (gestureManager != null)
         {
-            // ここでエラーが出ていた箇所。メソッドの型を修正したので解消されるはず。
-            gestureManager.OnCategorySelected += OnCategorySelected;
+            gestureManager.OnCategorySelected += (idx) => currentCategory = idx;
             gestureManager.OnKeySelected += OnKeySelected;
             gestureManager.OnBackspace += OnBackspace;
-            
-            // 人差し指/薬指の検知でマップを切り替える
-            gestureManager.OnLowercase += OnIndexFingerStart; // 人差し指開始
-            gestureManager.OnUppercase += OnRingFingerStart;  // 薬指開始
-
+            gestureManager.OnLowercase += () => useRingMap = false;
+            gestureManager.OnUppercase += () => useRingMap = true;
             if (gestureManager.GetType().GetEvent("OnSpaceKey") != null)
-            {
                 gestureManager.GetType().GetEvent("OnSpaceKey").AddEventHandler(gestureManager, new Action(OnSpaceInput));
-            }
         }
     }
 
-    void OnDestroy()
-    {
-        if (gestureManager != null)
-        {
-            gestureManager.OnCategorySelected -= OnCategorySelected;
-            gestureManager.OnKeySelected -= OnKeySelected;
-            gestureManager.OnBackspace -= OnBackspace;
-            gestureManager.OnLowercase -= OnIndexFingerStart;
-            gestureManager.OnUppercase -= OnRingFingerStart;
-            if (gestureManager.GetType().GetEvent("OnSpaceKey") != null)
-            {
-                gestureManager.GetType().GetEvent("OnSpaceKey").RemoveEventHandler(gestureManager, new Action(OnSpaceInput));
-            }
-        }
-    }
-
-    void OnIndexFingerStart() { useRingMap = false; Debug.Log("Map: Index Finger (あさなまら)"); }
-    void OnRingFingerStart() { useRingMap = true; Debug.Log("Map: Ring Finger (かたはやわ)"); }
-
-    // ▼▼▼ 修正箇所：引数を int に変更 ▼▼▼
-    // 以前: void OnCategorySelected(Vector3 start, Vector3 end)
-    void OnCategorySelected(int directionIndex)
-    {
-        currentCategory = directionIndex;
-        // Debug.Log($"カテゴリ選択: {categories[currentCategory]} (Index: {currentCategory})");
-    }
-    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
-    // ▼▼▼ 修正箇所：引数を int に変更 ▼▼▼
-    // 以前: void OnKeySelected(Vector3 start, Vector3 end)
     void OnKeySelected(int keyIndex)
     {
         if (currentCategory < 0) return;
-
-        // 使う指に応じて配列を切り替える
         string[,] currentMap = useRingMap ? ringKeys : indexKeys;
+        if (currentCategory >= currentMap.GetLength(0) || keyIndex < 0 || keyIndex >= currentMap.GetLength(1)) return;
 
-        // ▼ 配列の範囲外アクセスを防ぐガード処理を追加 ▼
-        int rows = currentMap.GetLength(0); // 通常は 6
-        int cols = currentMap.GetLength(1); // 通常は 6
-
-        if (currentCategory >= rows || keyIndex < 0 || keyIndex >= cols)
-        {
-             Debug.LogWarning($"[JapaneseFlickController] 無効なインデックスを検知しました。Category: {currentCategory}, KeyIndex: {keyIndex}");
-             currentCategory = -1;
-             return;
-        }
-        // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
-
-        // ここで安全にアクセスできる
         string inputChar = currentMap[currentCategory, keyIndex];
+        if (string.IsNullOrEmpty(inputChar)) return;
 
-        if (string.IsNullOrEmpty(inputChar)) {
-            currentCategory = -1;
-            return;
-        }
-
-        // 特殊機能キーの処理
-        if (inputChar.StartsWith("["))
-        {
-            ProcessModifier(inputChar);
-        }
+        if (inputChar.StartsWith("[")) ProcessModifier(inputChar);
         else
         {
-            // 通常文字入力
+            // 文字を通知（TutorialManagerが統計を判断）
             OutputString(inputChar);
         }
-
         currentCategory = -1;
     }
-    // ▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲▲
 
-    // 文字出力処理
     private void OutputString(string text)
     {
         if (inputManagerTarget != null)
         {
             inputManagerTarget.AppendCharacter(text);
             OnCharacterInputted?.Invoke(text);
-            lastInputChar = text; // 濁点用に記録
+            lastInputChar = text;
         }
     }
 
-    // 濁点・半濁点・小文字化の処理
     private void ProcessModifier(string modifier)
     {
         if (string.IsNullOrEmpty(lastInputChar) || inputManagerTarget == null) return;
-
-        Dictionary<string, string> targetMap = null;
-        switch (modifier)
-        {
-            case "[濁]": targetMap = dakutenMap; break;
-            case "[半]": targetMap = handakutenMap; break;
-            case "[小]": targetMap = smallCharMap; break;
-        }
-
+        Dictionary<string, string> targetMap = modifier switch { "[濁]" => dakutenMap, "[半]" => handakutenMap, "[小]" => smallCharMap, _ => null };
         if (targetMap != null && targetMap.ContainsKey(lastInputChar))
         {
-            // バックスペースで前の文字を消して、変換後の文字を入力
             inputManagerTarget.Backspace();
-            string newChar = targetMap[lastInputChar];
-            OutputString(newChar);
+            OutputString(targetMap[lastInputChar]);
         }
     }
 
-    void OnBackspace()
-    {
-        if (inputManagerTarget != null)
-        {
-            inputManagerTarget.Backspace();
-            lastInputChar = ""; // 履歴クリア
-        }
-    }
+    void OnBackspace() { if (inputManagerTarget != null) { inputManagerTarget.Backspace(); lastInputChar = ""; } }
+    void OnSpaceInput() { OutputString(" "); }
 
-    void OnSpaceInput()
-    {
-        OutputString(" ");
-    }
-
-    // 変換テーブル初期化
     private void InitializeModifierMaps()
     {
-        dakutenMap = new Dictionary<string, string> {
-            {"か", "が"}, {"き", "ぎ"}, {"く", "ぐ"}, {"け", "げ"}, {"こ", "ご"},
-            {"さ", "ざ"}, {"し", "じ"}, {"す", "ず"}, {"せ", "ぜ"}, {"そ", "ぞ"},
-            {"た", "だ"}, {"ち", "ぢ"}, {"つ", "づ"}, {"て", "で"}, {"と", "ど"},
-            {"は", "ば"}, {"ひ", "び"}, {"ふ", "ぶ"}, {"へ", "べ"}, {"ほ", "ぼ"},
-            {"う", "ゔ"}
-        };
-        handakutenMap = new Dictionary<string, string> {
-            {"は", "ぱ"}, {"ひ", "ぴ"}, {"ふ", "ぷ"}, {"へ", "ぺ"}, {"ほ", "ぽ"}
-        };
-        smallCharMap = new Dictionary<string, string> {
-            {"あ", "ぁ"}, {"い", "ぃ"}, {"う", "ぅ"}, {"え", "ぇ"}, {"お", "ぉ"},
-            {"つ", "っ"}, {"や", "ゃ"}, {"ゆ", "ゅ"}, {"よ", "ょ"},
-            {"わ", "ゎ"}
-        };
+        dakutenMap = new Dictionary<string, string> { {"か","が"},{"き","ぎ"},{"く","ぐ"},{"け","げ"},{"こ","ご"},{"さ","ざ"},{"し","じ"},{"す","ず"},{"せ","ぜ"},{"そ","ぞ"},{"た","だ"},{"ち","ぢ"},{"つ","づ"},{"て","で"},{"と","ど"},{"は","ば"},{"ひ","び"},{"ふ","ぶ"},{"へ","べ"},{"ほ","ぼ"},{"う","ゔ"} };
+        handakutenMap = new Dictionary<string, string> { {"は","ぱ"},{"ひ","ぴ"},{"ふ","ぶ"},{"へ","べ"},{"ほ","ぼ"} };
+        smallCharMap = new Dictionary<string, string> { {"あ","ぁ"},{"い","ぃ"},{"う","ぅ"},{"え","ぇ"},{"お","ぉ"},{"つ","っ"},{"や","ゃ"},{"ゆ","ゅ"},{"よ","ょ"},{"わ","ゎ"} };
     }
 }
